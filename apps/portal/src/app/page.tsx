@@ -106,7 +106,7 @@ export default function Home() {
        { value: null, formula: '=SUM(B2:B4)' },
        { value: null, formula: '=SUM(C2:C4)' }],
     ];
-    const bytes = writer.write(data, {
+    const bytes = await writer.write(data, {
       name: 'SheetForge Demo',
       columnWidths: [30, 20, 15],
       conditionalFormats: [{

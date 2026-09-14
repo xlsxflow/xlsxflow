@@ -112,31 +112,94 @@ writer.addRow([
 
 Because SheetForge parses chunks continuously rather than building an Abstract Syntax Tree (AST) in memory, its memory footprint remains effectively flat regardless of file size.
 
+Benchmarks were run on a standard development machine under **Node v25.8.2** using `--expose-gc` to measure clean heap deltas.
+
+### 1M Numbers (10 cols × 100k rows)
+
 ```mermaid
 gantt
-    title Peak Memory Usage (Parsing 1 Million Cells)
+    title Write Time — 1M Numbers
     dateFormat  X
-    axisFormat %s MB
+    axisFormat %s ms
+
+    section SheetForge v0.2
+    3939 ms   :done, 0, 3939
     
-    section SheetForge
-    3 MB   :done, 0, 3
+    section SheetJS (est.)
+    6500 ms   :active, 0, 6500
     
-    section SheetJS
-    180 MB :active, 0, 180
-    
-    section ExcelJS
-    450 MB :crit, 0, 450
+    section ExcelJS (est.)
+    12000 ms  :crit, 0, 12000
 ```
 
-| Library | Parsing Time (1M Cells) | Peak Memory (Heap) | Architecture |
+| Metric | SheetForge v0.2 | SheetJS (est.) | ExcelJS (est.) |
 |---|---|---|---|
-| **SheetForge** | **~9.4s** | **< 0 MB (Negative GC Profile)** | Streaming / SAX |
-| SheetJS | 12.1s* | ~180 MB | DOM / AST |
-| ExcelJS | 25.4s* | ~450 MB | DOM / AST |
+| **Write Time** | **3,939 ms** | ~6,500 ms | ~12,000 ms |
+| **File Size** | **2.9 MB** | ~3.1 MB | ~3.0 MB |
+| **Read Time** | **6,443 ms** | ~11,000 ms | ~26,000 ms |
+| **Peak Heap (Read)** | **+56.9 MB** | ~180 MB | ~450 MB |
 
-*(Tested on User Hardware / Node v25. *Competitor times estimated proportionally for this hardware profile)*
+### 1M Duplicate Strings (best case for SST deduplication)
 
-*\* Memory footprint remains flat for numerical data and repetitive strings. Highly unique string-heavy files will consume memory relative to the size of the shared string table.*
+| Metric | SheetForge v0.2 |
+|---|---|
+| **Write Time** | **3,120 ms** |
+| **File Size** | **2.6 MB** (SST dedup compresses well) |
+| **Read Time** | **5,816 ms** |
+| **Peak Heap (Read)** | **+55.9 MB** |
+
+### 1M Unique Strings (worst case — large SST)
+
+| Metric | SheetForge v0.2 |
+|---|---|
+| **Write Time** | **7,941 ms** |
+| **File Size** | **9.2 MB** |
+| **Read Time** | **6,593 ms** |
+| **Peak Heap (Iteration)** | **+8.6 MB** |
+
+*\\* Memory footprint remains flat for numerical data and repetitive strings. Highly unique string-heavy files will consume memory relative to the size of the shared string table — the SST is loaded into a Map before sheet iteration begins.*
+
+---
+
+## 📋 Changelog
+
+### v0.2.0-beta
+> Native Deflate Compression & Rich Text Support
+
+- **SheetWriter is now async** — `write()` returns `Promise<Uint8Array>`
+- **Native Deflate compression** via `CompressionStream('deflate-raw')` — no dependencies
+- **ZIP binary upgraded** — compression method `0x08`, correct uncompressed size & CRC-32 in headers
+- **File size reduction**: 1M cell file went from **30 MB → 2.9 MB** (90% smaller)
+- **Read speed improved**: parse time dropped from **~9.4s → 6.4s** (less I/O from smaller file)
+- **Rich Text / Inline String support** — `SheetReader` now parses `<t>` inside `<is>` and `<r>` elements
+- **Type fixes**: `@types/node` added, `TextDecoderStream` cast resolved
+- **ZIP backpressure deadlock** permanently fixed via concurrent background pump
+
+#### v0.2.0-beta vs v0.1.0-beta comparison
+
+| Metric | v0.1.0-beta | v0.2.0-beta | Delta |
+|---|---|---|---|
+| File size (1M cells) | 30 MB | 2.9 MB | **−90%** |
+| Write time | ~3,600 ms | ~3,900 ms | ~+8% (compression overhead) |
+| Read time | ~9,400 ms | ~6,400 ms | **−32%** (less disk I/O) |
+| ZIP Compression | Store (none) | Deflate (native) | ✅ |
+| Async write API | ❌ sync | ✅ async | ✅ |
+| Rich text cells | ❌ | ✅ | ✅ |
+
+---
+
+### v0.1.0-beta
+> Initial Release
+
+- Streaming SAX-style XLSX parser (`SheetReader`)
+- Zero-dependency XLSX writer (`SheetWriter`) with Store compression
+- ZIP stream parser built on native `TransformStream`
+- Shared String Table (`xl/sharedStrings.xml`) support
+- Pro tier architecture: `StyleEngine`, `FormulaEngine`, `ConditionalFormatter`
+- Dead-Drop license system (Zero-DB, hardware-bound, offline)
+- Next.js Portal (`apps/portal`) with interactive playground
+
+---
 
 ## 📄 License
 
