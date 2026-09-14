@@ -28,9 +28,9 @@ export async function* parseWorksheet(
           currentRow = [];
         } else if (token.name === 'c') {
           inCell = true;
-          currentCellType = token.attributes['t'] || null; // 's' means shared string
+          currentCellType = token.attributes['t'] || null; // 's' means shared string, 'inlineStr' means inline
           currentCellValue = '';
-        } else if (token.name === 'v') {
+        } else if (token.name === 'v' || token.name === 't') {
           inValue = true;
         }
       } else if (token.type === 'text') {
@@ -53,12 +53,14 @@ export async function* parseWorksheet(
           } else if (currentCellType === 'n' || (!currentCellType && currentCellValue)) {
              const num = Number(currentCellValue);
              resolvedValue = isNaN(num) ? currentCellValue : num;
+          } else if (currentCellType === 'inlineStr' || currentCellType === 'str') {
+             resolvedValue = currentCellValue;
           }
           
           currentRow.push(resolvedValue);
           inCell = false;
           currentCellType = null;
-        } else if (token.name === 'v') {
+        } else if (token.name === 'v' || token.name === 't') {
           inValue = false;
         }
       }

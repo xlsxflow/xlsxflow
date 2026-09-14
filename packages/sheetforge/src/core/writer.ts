@@ -36,7 +36,7 @@ export class SheetWriter {
   private sharedStrings: string[] = [];
   private sharedStringMap = new Map<string, number>();
 
-  write(rows: Row[], options: SheetOptions = {}): Uint8Array {
+  async write(rows: Row[], options: SheetOptions = {}): Promise<Uint8Array> {
     // Pre-load data into formula engine for evaluation
     const rawData = rows.map(row =>
       row.map(cell => isStyledCell(cell) ? cell.value as any : cell as any)
@@ -63,6 +63,8 @@ export class SheetWriter {
 
     return this.packZip(parts);
   }
+
+  // ... (keep buildWorksheetXml, addSharedString, buildSharedStringsXml, buildWorkbookXml, buildWorkbookRels, buildRootRels, buildContentTypes unchanged)
 
   private buildWorksheetXml(rows: Row[], options: SheetOptions): string {
     const colWidths = options.columnWidths
@@ -163,16 +165,46 @@ ${items}
 </Types>`;
   }
 
-  // Minimal pure-JS ZIP packer (Store compression — no dependencies)
-  private packZip(parts: Record<string, string>): Uint8Array {
+  private async compressData(data: Uint8Array): Promise<Uint8Array> {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(data);
+        controller.close();
+      }
+    });
+    const compressedStream = stream.pipeThrough(new CompressionStream('deflate-raw'));
+    const reader = compressedStream.getReader();
+    const chunks: Uint8Array[] = [];
+    let totalLen = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      totalLen += value.length;
+    }
+    const result = new Uint8Array(totalLen);
+    let offset = 0;
+    for (const c of chunks) {
+      result.set(c, offset);
+      offset += c.length;
+    }
+    return result;
+  }
+
+  // Minimal pure-JS ZIP packer (Deflate compression — no dependencies)
+  private async packZip(parts: Record<string, string>): Promise<Uint8Array> {
     const encoder = new TextEncoder();
-    const entries: { filename: Uint8Array; data: Uint8Array; offset: number }[] = [];
+    const entries: { filename: Uint8Array; data: Uint8Array; offset: number; uncompressedSize: number; crc: number }[] = [];
     const chunks: Uint8Array[] = [];
     let offset = 0;
 
     for (const [path, content] of Object.entries(parts)) {
       const filename = encoder.encode(path);
-      const data = encoder.encode(content);
+      const uncompressedData = encoder.encode(content);
+      const uncompressedSize = uncompressedData.length;
+      const crc = this.crc32(uncompressedData);
+      
+      const data = await this.compressData(uncompressedData);
 
       // Local file header
       const header = new Uint8Array(30 + filename.length);
@@ -180,17 +212,17 @@ ${items}
       view.setUint32(0, 0x04034b50, true);  // signature
       view.setUint16(4, 20, true);           // version needed
       view.setUint16(6, 0, true);            // flags
-      view.setUint16(8, 0, true);            // compression (Store)
+      view.setUint16(8, 8, true);            // compression (Deflate)
       view.setUint16(10, 0, true);           // mod time
       view.setUint16(12, 0, true);           // mod date
-      view.setUint32(14, this.crc32(data), true); // CRC-32
+      view.setUint32(14, crc, true);         // CRC-32 (uncompressed)
       view.setUint32(18, data.length, true); // compressed size
-      view.setUint32(22, data.length, true); // uncompressed size
+      view.setUint32(22, uncompressedSize, true); // uncompressed size
       view.setUint16(26, filename.length, true); // filename length
       view.setUint16(28, 0, true);           // extra field length
       header.set(filename, 30);
 
-      entries.push({ filename, data, offset });
+      entries.push({ filename, data, offset, uncompressedSize, crc });
       chunks.push(header, data);
       offset += header.length + data.length;
     }
@@ -206,12 +238,12 @@ ${items}
       view.setUint16(4, 20, true);            // version made by
       view.setUint16(6, 20, true);            // version needed
       view.setUint16(8, 0, true);             // flags
-      view.setUint16(10, 0, true);            // compression
+      view.setUint16(10, 8, true);            // compression (Deflate)
       view.setUint16(12, 0, true);            // mod time
       view.setUint16(14, 0, true);            // mod date
-      view.setUint32(16, this.crc32(entry.data), true); // CRC-32
+      view.setUint32(16, entry.crc, true);    // CRC-32
       view.setUint32(20, entry.data.length, true); // compressed size
-      view.setUint32(24, entry.data.length, true); // uncompressed size
+      view.setUint32(24, entry.uncompressedSize, true); // uncompressed size
       view.setUint16(28, entry.filename.length, true); // filename length
       view.setUint16(30, 0, true);            // extra field length
       view.setUint16(32, 0, true);            // comment length
