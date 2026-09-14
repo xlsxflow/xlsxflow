@@ -48,6 +48,46 @@ describe('SheetWriter', () => {
     expect(bytes[0]).toBe(0x50); // P
     expect(bytes[1]).toBe(0x4b); // K
   });
+
+  it('should support multiple sheets', async () => {
+    const writer = new SheetWriter();
+    writer.addSheet('First', [[1, 2]]);
+    writer.addSheet('Second', [['A', 'B']]);
+    const bytes = await writer.write();
+    expect(bytes[0]).toBe(0x50); // P
+    expect(bytes[1]).toBe(0x4b); // K
+    expect(bytes.length).toBeGreaterThan(100);
+  });
+
+  it('should write a date and read it back as an ISO string', async () => {
+    const writer = new SheetWriter();
+    const dateNum = 45000; // ~ 2023-03-15
+    writer.addSheet('Dates', [[
+      { value: dateNum, style: { numFmt: 'yyyy-mm-dd' } }
+    ]]);
+    const bytes = await writer.write();
+
+    // Verify via Reader
+    const { SheetReader } = await import('../src/core/index');
+    const reader = new SheetReader();
+    // @ts-ignore
+    const oldParse = reader.parseStyles;
+    // @ts-ignore
+    reader.parseStyles = async function(xmlTokenStream, map) {
+      await oldParse.call(this, xmlTokenStream, map);
+      console.log('STYLES MAP:', map);
+    };
+    
+    const stream = new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
+    
+    let parsedRows: any[] = [];
+    for await (const row of await reader.parse(stream)) {
+      parsedRows.push(row);
+    }
+    
+    // 45000 in Excel is 2023-03-15T00:00:00.000Z
+    expect(parsedRows[0][0]).toBe('2023-03-15T00:00:00.000Z');
+  });
 });
 
 describe('FormulaEngine (via SheetWriter)', () => {

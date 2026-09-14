@@ -68,6 +68,7 @@ export function createXmlStreamParser(): TransformStream<Uint8Array, XmlToken> {
           }
         }
       }
+      buffer = buffer.slice(index);
     },
     flush(controller) {
       buffer += decoder.decode();

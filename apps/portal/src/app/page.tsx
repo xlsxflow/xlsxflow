@@ -106,14 +106,23 @@ export default function Home() {
        { value: null, formula: '=SUM(B2:B4)' },
        { value: null, formula: '=SUM(C2:C4)' }],
     ];
-    const bytes = await writer.write(data, {
-      name: 'SheetForge Demo',
+    
+    writer.addSheet('Sales Data', data, {
       columnWidths: [30, 20, 15],
       conditionalFormats: [{
         range: 'B2:B4',
         rule: { type: 'dataBar', color: 'FF06b6d4' }
       }]
     });
+
+    const todayExcel = 25569 + (Date.now() / 86400000);
+    writer.addSheet('Metadata', [
+      ['Property', 'Value'],
+      ['Generated On', { value: todayExcel, style: { numFmt: 'yyyy-mm-dd hh:mm:ss' } }],
+      ['Generator', 'SheetForge v0.3.0-beta']
+    ], { columnWidths: [20, 30] });
+
+    const bytes = await writer.write();
     const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');

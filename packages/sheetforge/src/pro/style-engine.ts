@@ -5,6 +5,7 @@ interface StyleRegistry {
   fonts: Map<string, number>;
   fills: Map<string, number>;
   borders: Map<string, number>;
+  numFmts: Map<string, number>;
   cellXfs: { fontId: number; fillId: number; borderId: number; numFmtId: number; alignmentXml: string }[];
 }
 
@@ -13,6 +14,7 @@ export class StyleEngine {
     fonts: new Map(),
     fills: new Map(),
     borders: new Map(),
+    numFmts: new Map(),
     cellXfs: [],
   };
 
@@ -26,7 +28,7 @@ export class StyleEngine {
 
     const xf = { fontId, fillId, borderId, numFmtId, alignmentXml };
     this.registry.cellXfs.push(xf);
-    return this.registry.cellXfs.length - 1;
+    return this.registry.cellXfs.length; // 1-based because 0 is the default xf
   }
 
   private registerFont(font: CellFont): number {
@@ -54,8 +56,10 @@ export class StyleEngine {
   }
 
   private registerNumFmt(fmt: string): number {
-    // Custom numFmt IDs start at 164 per OOXML spec
-    return 164;
+    if (this.registry.numFmts.has(fmt)) return this.registry.numFmts.get(fmt)!;
+    const id = 164 + this.registry.numFmts.size;
+    this.registry.numFmts.set(fmt, id);
+    return id;
   }
 
   private buildAlignmentXml(alignment: CellAlignment): string {
@@ -68,6 +72,7 @@ export class StyleEngine {
 
   // Serialize entire style registry to OOXML styleSheet XML
   toXml(): string {
+    const numFmtsXml = this.buildNumFmtsXml();
     const fontsXml = this.buildFontsXml();
     const fillsXml = this.buildFillsXml();
     const bordersXml = this.buildBordersXml();
@@ -75,13 +80,23 @@ export class StyleEngine {
 
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+${numFmtsXml}
 ${fontsXml}
 ${fillsXml}
 ${bordersXml}
-<cellXfs count="${this.registry.cellXfs.length}">
+<cellXfs count="${this.registry.cellXfs.length + 1}">
 ${cellXfsXml}
 </cellXfs>
 </styleSheet>`;
+  }
+
+  private buildNumFmtsXml(): string {
+    if (this.registry.numFmts.size === 0) return '';
+    const entries: string[] = [];
+    for (const [fmt, id] of this.registry.numFmts) {
+      entries.push(`<numFmt numFmtId="${id}" formatCode="${fmt}"/>`);
+    }
+    return `<numFmts count="${entries.length}">${entries.join('')}</numFmts>`;
   }
 
   private buildFontsXml(): string {

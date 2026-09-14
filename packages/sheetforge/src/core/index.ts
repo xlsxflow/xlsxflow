@@ -12,6 +12,7 @@ export class SheetReader {
     const zipReader = zipStream.getReader();
 
     let sharedStrings = new Map<number, string>();
+    let styles = new Map<number, number>();
     let workbookXml = '';
     let workbookRelsXml = '';
     let targetSheetPath: string | null = null;
@@ -42,6 +43,11 @@ export class SheetReader {
               if (entry.compressionMethod === 8) s = s.pipeThrough(new DecompressionStream('deflate-raw') as any);
               const xmlStream = s.pipeThrough(createXmlStreamParser());
               await this.parseSharedStrings(xmlStream, sharedStrings);
+            } else if (entry.filename === 'xl/styles.xml') {
+              let s = entry.stream;
+              if (entry.compressionMethod === 8) s = s.pipeThrough(new DecompressionStream('deflate-raw') as any);
+              const xmlStream = s.pipeThrough(createXmlStreamParser());
+              await this.parseStyles(xmlStream, styles);
             } else if (entry.filename.startsWith('xl/worksheets/')) {
               if (options?.sheetName && !targetSheetPath) {
                 reject(new Error(`Cannot stream worksheet: workbook.xml must precede worksheets in the ZIP to resolve by name.`));
@@ -78,7 +84,7 @@ export class SheetReader {
 
     const streamFound = await findWorksheetPromise;
     const xmlStream = streamFound.pipeThrough(createXmlStreamParser());
-    return parseWorksheet(xmlStream, sharedStrings);
+    return parseWorksheet(xmlStream, sharedStrings, styles);
   }
 
   private tryResolveSheetPath(workbookXml: string, relsXml: string, options: ParseOptions | undefined, setPath: (p: string) => void) {
@@ -125,6 +131,43 @@ export class SheetReader {
         } else if (token.type === 'endElement' && token.name === 't') {
           inText = false;
           map.set(index++, currentString);
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  private async parseStyles(xmlTokenStream: ReadableStream<XmlToken>, map: Map<number, number>) {
+    const reader = xmlTokenStream.getReader();
+    let index = 0;
+    let inCellXfs = false;
+    let inNumFmts = false;
+    const customDateFmts = new Set<number>();
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const token = value as XmlToken;
+        if (token.type === 'startElement') {
+          if (token.name === 'numFmts') inNumFmts = true;
+          else if (token.name === 'cellXfs') inCellXfs = true;
+          else if (token.name === 'numFmt' && inNumFmts) {
+            const id = parseInt(token.attributes['numFmtId'] || '0', 10);
+            const formatCode = token.attributes['formatCode'] || '';
+            if (/[ymdhms]/i.test(formatCode)) {
+              customDateFmts.add(id);
+            }
+          } else if (token.name === 'xf' && inCellXfs) {
+            const numFmtId = parseInt(token.attributes['numFmtId'] || '0', 10);
+            const isDate = (numFmtId >= 14 && numFmtId <= 22) || (numFmtId >= 45 && numFmtId <= 47) || customDateFmts.has(numFmtId);
+            map.set(index++, isDate ? 14 : 0);
+          }
+        } else if (token.type === 'endElement') {
+          if (token.name === 'numFmts') inNumFmts = false;
+          else if (token.name === 'cellXfs') inCellXfs = false;
         }
       }
     } finally {

@@ -5,6 +5,10 @@ export type FormulaResult = number | string | boolean | null;
 export class FormulaEngine {
   private cells: Map<string, FormulaResult> = new Map();
 
+  clear() {
+    this.cells.clear();
+  }
+
   // Load a grid of values for formula context (keyed by cell ref e.g. "A1")
   loadData(data: (FormulaResult)[][], startRow = 1) {
     data.forEach((row, ri) => {

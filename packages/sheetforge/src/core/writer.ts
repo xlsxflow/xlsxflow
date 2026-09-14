@@ -35,31 +35,52 @@ export class SheetWriter {
   private formulaEngine = new FormulaEngine();
   private sharedStrings: string[] = [];
   private sharedStringMap = new Map<string, number>();
+  private sheets: { name: string; rows: Row[]; options: SheetOptions }[] = [];
 
-  async write(rows: Row[], options: SheetOptions = {}): Promise<Uint8Array> {
-    // Pre-load data into formula engine for evaluation
-    const rawData = rows.map(row =>
-      row.map(cell => isStyledCell(cell) ? cell.value as any : cell as any)
-    );
-    this.formulaEngine.loadData(rawData);
+  addSheet(name: string, rows: Row[], options: SheetOptions = {}): this {
+    this.sheets.push({ name, rows, options });
+    return this;
+  }
 
-    const sheetXml = this.buildWorksheetXml(rows, options);
-    const sharedStringsXml = this.buildSharedStringsXml();
-    const stylesXml = this.styleEngine.toXml();
-    const conditionalXml = options.conditionalFormats
-      ? this.conditionalFormatter.toXml(options.conditionalFormats)
-      : '';
+  async write(rows?: Row[], options: SheetOptions = {}): Promise<Uint8Array> {
+    if (rows) {
+      this.addSheet(options.name ?? 'Sheet1', rows, options);
+    }
+    if (this.sheets.length === 0) {
+      this.addSheet('Sheet1', []);
+    }
 
-    // Assemble OOXML parts into a ZIP
     const parts: Record<string, string> = {
       '[Content_Types].xml': this.buildContentTypes(),
       '_rels/.rels': this.buildRootRels(),
-      'xl/workbook.xml': this.buildWorkbookXml(options.name ?? 'Sheet1'),
+      'xl/workbook.xml': this.buildWorkbookXml(),
       'xl/_rels/workbook.xml.rels': this.buildWorkbookRels(),
-      'xl/worksheets/sheet1.xml': sheetXml + conditionalXml,
-      'xl/sharedStrings.xml': sharedStringsXml,
-      'xl/styles.xml': stylesXml,
     };
+
+    // Build sharedStrings and styles FIRST so they appear earlier in the ZIP.
+    // This allows streaming readers to parse metadata before processing massive worksheets.
+    const sheetsData: { xml: string; conditionalXml: string }[] = [];
+    for (let i = 0; i < this.sheets.length; i++) {
+      const sheet = this.sheets[i];
+      this.formulaEngine.clear();
+      const rawData = sheet.rows.map(row =>
+        row.map(cell => isStyledCell(cell) ? cell.value as any : cell as any)
+      );
+      this.formulaEngine.loadData(rawData);
+
+      const xml = this.buildWorksheetXml(sheet.rows, sheet.options);
+      const conditionalXml = sheet.options.conditionalFormats
+        ? this.conditionalFormatter.toXml(sheet.options.conditionalFormats)
+        : '';
+      sheetsData.push({ xml, conditionalXml });
+    }
+
+    parts['xl/sharedStrings.xml'] = this.buildSharedStringsXml();
+    parts['xl/styles.xml'] = this.styleEngine.toXml();
+
+    for (let i = 0; i < sheetsData.length; i++) {
+      parts[`xl/worksheets/sheet${i + 1}.xml`] = sheetsData[i].xml + sheetsData[i].conditionalXml;
+    }
 
     return this.packZip(parts);
   }
@@ -127,22 +148,32 @@ ${items}
 </sst>`;
   }
 
-  private buildWorkbookXml(sheetName: string): string {
+  private buildWorkbookXml(): string {
+    const sheetsXml = this.sheets.map((s, i) => 
+      `<sheet name="${escapeXml(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`
+    ).join('');
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
-    <sheet name="${escapeXml(sheetName)}" sheetId="1" r:id="rId1"/>
+    ${sheetsXml}
   </sheets>
 </workbook>`;
   }
 
   private buildWorkbookRels(): string {
+    const sheetRels = this.sheets.map((_, i) => 
+      `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`
+    ).join('\n  ');
+    
+    const ssId = this.sheets.length + 1;
+    const stylesId = this.sheets.length + 2;
+
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  ${sheetRels}
+  <Relationship Id="rId${ssId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
+  <Relationship Id="rId${stylesId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`;
   }
 
@@ -154,12 +185,16 @@ ${items}
   }
 
   private buildContentTypes(): string {
+    const sheetOverrides = this.sheets.map((_, i) => 
+      `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
+    ).join('\n  ');
+
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  ${sheetOverrides}
   <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>`;
