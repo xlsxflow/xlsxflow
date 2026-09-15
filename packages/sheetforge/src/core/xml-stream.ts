@@ -27,6 +27,30 @@ export function createXmlStreamParser(): TransformStream<Uint8Array, XmlToken> {
           }
         }
 
+        // Check for CDATA
+        if (buffer.startsWith('<![CDATA[', tagStart)) {
+          const cdataEnd = buffer.indexOf(']]>', tagStart);
+          if (cdataEnd === -1) {
+            buffer = buffer.slice(tagStart);
+            break;
+          }
+          const cdataText = buffer.slice(tagStart + 9, cdataEnd);
+          controller.enqueue({ type: 'text', value: cdataText });
+          index = cdataEnd + 3;
+          continue;
+        }
+
+        // Check for HTML Comments
+        if (buffer.startsWith('<!--', tagStart)) {
+          const commentEnd = buffer.indexOf('-->', tagStart);
+          if (commentEnd === -1) {
+            buffer = buffer.slice(tagStart);
+            break;
+          }
+          index = commentEnd + 3;
+          continue;
+        }
+
         const tagEnd = buffer.indexOf('>', tagStart);
         if (tagEnd === -1) {
           // Tag is incomplete, wait for more chunks
@@ -41,6 +65,9 @@ export function createXmlStreamParser(): TransformStream<Uint8Array, XmlToken> {
           controller.enqueue({ type: 'endElement', name: tagContent.slice(1).trim() });
         } else if (tagContent.startsWith('?')) {
           // XML declaration, ignore
+        } else if (tagContent.startsWith('!')) {
+          // DOCTYPE or other DTD declarations, ignore
+
         } else {
           // Parse start element and attributes
           const spaceIdx = tagContent.indexOf(' ');

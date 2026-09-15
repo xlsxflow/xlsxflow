@@ -13,22 +13,50 @@ export function excelToIsoDate(serial: number): string {
   return new Date(ms).toISOString();
 }
 
-export async function* parseWorksheet(
+export interface SheetMetadata {
+  mergedCells: string[];
+}
+
+export class ParseResult implements AsyncIterable<CellValue[]> {
+  constructor(
+    private generator: AsyncGenerator<CellValue[]>,
+    private metadataPromise: Promise<SheetMetadata>
+  ) {}
+
+  [Symbol.asyncIterator]() {
+    return this.generator;
+  }
+
+  async getMetadata(): Promise<SheetMetadata> {
+    return this.metadataPromise;
+  }
+}
+
+export function parseWorksheet(
   xmlTokenStream: ReadableStream<XmlToken>,
   sharedStrings: Map<number, string>,
   styles: Map<number, number>
-): AsyncGenerator<CellValue[]> {
-  const reader = xmlTokenStream.getReader();
-  
-  let currentRow: CellValue[] = [];
-  let currentCellType: string | null = null;
-  let currentStyleId: number | null = null;
-  let currentCellValue: string = '';
-  let inRow = false;
-  let inCell = false;
-  let inValue = false;
+): ParseResult {
+  let resolveMeta!: (m: SheetMetadata) => void;
+  let rejectMeta!: (e: any) => void;
+  const metadataPromise = new Promise<SheetMetadata>((res, rej) => {
+    resolveMeta = res;
+    rejectMeta = rej;
+  });
+  const mergedCells: string[] = [];
 
-  try {
+  async function* generateRows(): AsyncGenerator<CellValue[]> {
+    const reader = xmlTokenStream.getReader();
+    
+    let currentRow: CellValue[] = [];
+    let currentCellType: string | null = null;
+    let currentStyleId: number | null = null;
+    let currentCellValue: string = '';
+    let inRow = false;
+    let inCell = false;
+    let inValue = false;
+
+    try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -46,6 +74,8 @@ export async function* parseWorksheet(
           currentCellValue = '';
         } else if (token.name === 'v' || token.name === 't') {
           inValue = true;
+        } else if (token.name === 'mergeCell') {
+          if (token.attributes['ref']) mergedCells.push(token.attributes['ref']);
         }
       } else if (token.type === 'text') {
         if (inValue) {
@@ -88,7 +118,14 @@ export async function* parseWorksheet(
         }
       }
     }
-  } finally {
-    reader.releaseLock();
+    resolveMeta({ mergedCells });
+  } catch (e) {
+      rejectMeta(e);
+      throw e;
+    } finally {
+      reader.releaseLock();
+    }
   }
+
+  return new ParseResult(generateRows(), metadataPromise);
 }

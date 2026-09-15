@@ -2,6 +2,7 @@ import { Row, StyledCell, CellValue, SheetOptions } from '../pro/types';
 import { StyleEngine } from '../pro/style-engine';
 import { ConditionalFormatter } from '../pro/conditional-formatter';
 import { FormulaEngine } from '../pro/formula-engine';
+import { ZipStreamWriter } from './zip-stream-writer';
 
 // Utility: convert 0-based col index to column letter (A, B, ..., Z, AA...)
 function colLetter(colIndex: number): string {
@@ -35,14 +36,15 @@ export class SheetWriter {
   private formulaEngine = new FormulaEngine();
   private sharedStrings: string[] = [];
   private sharedStringMap = new Map<string, number>();
-  private sheets: { name: string; rows: Row[]; options: SheetOptions }[] = [];
+  private sheets: { name: string; rows: Row[] | AsyncIterable<Row>; options: SheetOptions }[] = [];
 
-  addSheet(name: string, rows: Row[], options: SheetOptions = {}): this {
+  addSheet(name: string, rows: Row[] | AsyncIterable<Row>, options: SheetOptions = {}): this {
     this.sheets.push({ name, rows, options });
     return this;
   }
 
-  async write(rows?: Row[], options: SheetOptions = {}): Promise<Uint8Array> {
+  // Accept rows directly or via options, returning a standard ReadableStream
+  write(rows?: Row[], options: SheetOptions = {}): ReadableStream<Uint8Array> {
     if (rows) {
       this.addSheet(options.name ?? 'Sheet1', rows, options);
     }
@@ -50,85 +52,171 @@ export class SheetWriter {
       this.addSheet('Sheet1', []);
     }
 
-    const parts: Record<string, string> = {
-      '[Content_Types].xml': this.buildContentTypes(),
-      '_rels/.rels': this.buildRootRels(),
-      'xl/workbook.xml': this.buildWorkbookXml(),
-      'xl/_rels/workbook.xml.rels': this.buildWorkbookRels(),
-    };
+    const zip = new ZipStreamWriter();
+    
+    // Push the build process to background so we can return the stream immediately
+    (async () => {
+      try {
+        await this.streamString(zip, '[Content_Types].xml', this.buildContentTypes());
+        await this.streamString(zip, '_rels/.rels', this.buildRootRels());
+        await this.streamString(zip, 'xl/workbook.xml', this.buildWorkbookXml());
+        await this.streamString(zip, 'xl/_rels/workbook.xml.rels', this.buildWorkbookRels());
 
-    // Build sharedStrings and styles FIRST so they appear earlier in the ZIP.
-    // This allows streaming readers to parse metadata before processing massive worksheets.
-    const sheetsData: { xml: string; conditionalXml: string }[] = [];
-    for (let i = 0; i < this.sheets.length; i++) {
-      const sheet = this.sheets[i];
-      this.formulaEngine.clear();
-      const rawData = sheet.rows.map(row =>
-        row.map(cell => isStyledCell(cell) ? cell.value as any : cell as any)
-      );
-      this.formulaEngine.loadData(rawData);
+        // Build sharedStrings and styles (for async iterable we can't pre-calculate them without 2 passes, 
+        // so we must use inlineStr for strings if the user provides an AsyncIterable).
+        const sheetsMetadata: { options: SheetOptions }[] = [];
+        for (let i = 0; i < this.sheets.length; i++) {
+          sheetsMetadata.push({ options: this.sheets[i].options });
+        }
 
-      const xml = this.buildWorksheetXml(sheet.rows, sheet.options);
-      const conditionalXml = sheet.options.conditionalFormats
-        ? this.conditionalFormatter.toXml(sheet.options.conditionalFormats)
-        : '';
-      sheetsData.push({ xml, conditionalXml });
-    }
+        // Pre-pass for arrays to register styles and load formula data
+        for (let i = 0; i < this.sheets.length; i++) {
+          const sheet = this.sheets[i];
+          if (Array.isArray(sheet.rows)) {
+            const rawData = sheet.rows.map((row: Row) =>
+              row.map((cell: any) => isStyledCell(cell) ? cell.value : cell)
+            );
+            this.formulaEngine.loadData(rawData);
+            
+            // Pre-register styles
+            sheet.rows.forEach(row => {
+              row.forEach(cell => {
+                if (isStyledCell(cell) && cell.style) {
+                  this.styleEngine.registerStyle(cell.style);
+                }
+              });
+            });
+          }
+        }
 
-    parts['xl/sharedStrings.xml'] = this.buildSharedStringsXml();
-    parts['xl/styles.xml'] = this.styleEngine.toXml();
+        // Write styles and sharedStrings FIRST so streaming readers can parse them early
+        await this.streamString(zip, 'xl/sharedStrings.xml', this.buildSharedStringsXml());
+        await this.streamString(zip, 'xl/styles.xml', this.styleEngine.toXml());
 
-    for (let i = 0; i < sheetsData.length; i++) {
-      parts[`xl/worksheets/sheet${i + 1}.xml`] = sheetsData[i].xml + sheetsData[i].conditionalXml;
-    }
+        // Then write worksheets
+        for (let i = 0; i < this.sheets.length; i++) {
+          const sheet = this.sheets[i];
+          const stream = this.buildWorksheetXmlStream(sheet.rows, sheet.options);
+          await zip.addFile(`xl/worksheets/sheet${i + 1}.xml`, stream);
+        }
 
-    return this.packZip(parts);
+        await zip.close();
+      } catch (err) {
+        console.error('Writer Error:', err);
+      }
+    })();
+
+    return zip.stream;
+  }
+
+  private async streamString(zip: any, filename: string, content: string) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(content);
+    const stream = new ReadableStream({
+      start(c) { c.enqueue(data); c.close(); }
+    });
+    await zip.addFile(filename, stream);
   }
 
   // ... (keep buildWorksheetXml, addSharedString, buildSharedStringsXml, buildWorkbookXml, buildWorkbookRels, buildRootRels, buildContentTypes unchanged)
 
-  private buildWorksheetXml(rows: Row[], options: SheetOptions): string {
-    const colWidths = options.columnWidths
-      ? options.columnWidths.map((w, i) =>
-          `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`
-        ).join('')
-      : '';
+  private buildWorksheetXmlStream(rows: Row[] | AsyncIterable<Row>, options: SheetOptions): ReadableStream<Uint8Array> {
+    const encoder = new TextEncoder();
+    const self = this;
 
-    const rowsXml = rows.map((row, ri) => {
-      const rowNum = ri + 1;
-      const cellsXml = row.map((cell, ci) => {
-        const colRef = colLetter(ci) + rowNum;
-        const styledCell = isStyledCell(cell) ? cell : { value: cell };
-        const style = styledCell.style ? this.styleEngine.registerStyle(styledCell.style) : 0;
-        const sAttr = style > 0 ? ` s="${style}"` : '';
+    return new ReadableStream({
+      async start(controller) {
+        const colWidths = options.columnWidths
+          ? options.columnWidths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')
+          : '';
 
-        if (styledCell.formula) {
-          const result = this.formulaEngine.evaluate(styledCell.formula);
-          const cachedVal = typeof result === 'number' ? `<v>${result}</v>` : (result ? `<v>${escapeXml(String(result))}</v>` : '');
-          return `<c r="${colRef}"${sAttr}><f>${escapeXml(styledCell.formula.replace(/^=/, ''))}</f>${cachedVal}</c>`;
+        let sheetViews = '';
+        if (options.freezePanes) {
+          const { row = 0, col = 0 } = options.freezePanes;
+          let activePane = 'bottomRight';
+          if (row > 0 && col === 0) activePane = 'bottomLeft';
+          if (row === 0 && col > 0) activePane = 'topRight';
+          const topLeftCell = colLetter(col) + (row + 1);
+          sheetViews = `<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane ySplit="${row}" xSplit="${col}" topLeftCell="${topLeftCell}" activePane="${activePane}" state="frozen"/></sheetView></sheetViews>`;
         }
 
-        const val = styledCell.value;
-        if (val === null || val === undefined) return `<c r="${colRef}"${sAttr}/>`;
-        if (typeof val === 'boolean') return `<c r="${colRef}" t="b"${sAttr}><v>${val ? 1 : 0}</v></c>`;
-        if (typeof val === 'number') return `<c r="${colRef}"${sAttr}><v>${val}</v></c>`;
-        if (typeof val === 'string') {
-          const idx = this.addSharedString(val);
-          return `<c r="${colRef}" t="s"${sAttr}><v>${idx}</v></c>`;
-        }
-        return `<c r="${colRef}"${sAttr}/>`;
-      }).join('');
-      return `<row r="${rowNum}">${cellsXml}</row>`;
-    }).join('');
+        let header = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`;
+        header += `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n`;
+        header += `  ${sheetViews}\n`;
+        header += `  ${colWidths ? `<cols>${colWidths}</cols>` : ''}\n`;
+        header += `  <sheetData>\n`;
+        controller.enqueue(encoder.encode(header));
 
-    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  ${colWidths ? `<cols>${colWidths}</cols>` : ''}
-  <sheetData>
-    ${rowsXml}
-  </sheetData>
-</worksheet>`;
+        let ri = 0;
+        
+        // Handle both Array and AsyncIterable
+        const iterator = Symbol.asyncIterator in rows 
+          ? (rows as AsyncIterable<Row>)[Symbol.asyncIterator]()
+          : (async function*() { for (const r of rows as Row[]) yield r; })();
+
+        while (true) {
+          const { done, value: row } = await iterator.next();
+          if (done) break;
+
+          const rowNum = ri + 1;
+          const cellsXml = row.map((cell, ci) => {
+            const colRef = colLetter(ci) + rowNum;
+            const styledCell = isStyledCell(cell) ? cell : { value: cell };
+            const style = styledCell.style ? self.styleEngine.registerStyle(styledCell.style) : 0;
+            const sAttr = style > 0 ? ` s="${style}"` : '';
+
+            if (styledCell.formula) {
+              const result = self.formulaEngine.evaluate(styledCell.formula);
+              const cachedVal = typeof result === 'number' ? `<v>${result}</v>` : (result ? `<v>${escapeXml(String(result))}</v>` : '');
+              return `<c r="${colRef}"${sAttr}><f>${escapeXml(styledCell.formula.replace(/^=/, ''))}</f>${cachedVal}</c>`;
+            }
+
+            const val = styledCell.value;
+            if (val === null || val === undefined) return `<c r="${colRef}"${sAttr}/>`;
+            if (typeof val === 'boolean') return `<c r="${colRef}" t="b"${sAttr}><v>${val ? 1 : 0}</v></c>`;
+            if (typeof val === 'number') return `<c r="${colRef}"${sAttr}><v>${val}</v></c>`;
+            if (typeof val === 'string') {
+              // Always use inlineStr for streaming (avoids memory overhead of sharedStrings)
+              return `<c r="${colRef}" t="inlineStr"${sAttr}><is><t>${escapeXml(val)}</t></is></c>`;
+            }
+            return `<c r="${colRef}"${sAttr}/>`;
+          }).join('');
+          
+          controller.enqueue(encoder.encode(`    <row r="${rowNum}">${cellsXml}</row>\n`));
+          ri++;
+        }
+
+        let footer = `  </sheetData>\n`;
+
+        if (options.mergeCells && options.mergeCells.length > 0) {
+          const merges = options.mergeCells.map(ref => `<mergeCell ref="${escapeXml(ref)}"/>`).join('');
+          footer += `  <mergeCells count="${options.mergeCells.length}">${merges}</mergeCells>\n`;
+        }
+
+        if (options.dataValidations && options.dataValidations.length > 0) {
+          const dvs = options.dataValidations.map(dv => {
+            let attr = `sqref="${escapeXml(dv.sqref)}"`;
+            if (dv.type) attr += ` type="${dv.type}"`;
+            if (dv.allowBlank !== undefined) attr += ` allowBlank="${dv.allowBlank ? 1 : 0}"`;
+            if (dv.showInputMessage !== undefined) attr += ` showInputMessage="${dv.showInputMessage ? 1 : 0}"`;
+            if (dv.showErrorMessage !== undefined) attr += ` showErrorMessage="${dv.showErrorMessage ? 1 : 0}"`;
+            let inner = '';
+            if (dv.formula1) inner += `<formula1>${escapeXml(dv.formula1)}</formula1>`;
+            if (dv.formula2) inner += `<formula2>${escapeXml(dv.formula2)}</formula2>`;
+            return `<dataValidation ${attr}>${inner}</dataValidation>`;
+          }).join('');
+          footer += `  <dataValidations count="${options.dataValidations.length}">${dvs}</dataValidations>\n`;
+        }
+
+        if (options.conditionalFormats) {
+          footer += self.conditionalFormatter.toXml(options.conditionalFormats) + '\n';
+        }
+
+        footer += `</worksheet>`;
+        controller.enqueue(encoder.encode(footer));
+        controller.close();
+      }
+    });
   }
 
   private addSharedString(str: string): number {
@@ -200,128 +288,5 @@ ${items}
 </Types>`;
   }
 
-  private async compressData(data: Uint8Array): Promise<Uint8Array> {
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(data);
-        controller.close();
-      }
-    });
-    const compressedStream = stream.pipeThrough(new CompressionStream('deflate-raw'));
-    const reader = compressedStream.getReader();
-    const chunks: Uint8Array[] = [];
-    let totalLen = 0;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      totalLen += value.length;
-    }
-    const result = new Uint8Array(totalLen);
-    let offset = 0;
-    for (const c of chunks) {
-      result.set(c, offset);
-      offset += c.length;
-    }
-    return result;
-  }
 
-  // Minimal pure-JS ZIP packer (Deflate compression — no dependencies)
-  private async packZip(parts: Record<string, string>): Promise<Uint8Array> {
-    const encoder = new TextEncoder();
-    const entries: { filename: Uint8Array; data: Uint8Array; offset: number; uncompressedSize: number; crc: number }[] = [];
-    const chunks: Uint8Array[] = [];
-    let offset = 0;
-
-    for (const [path, content] of Object.entries(parts)) {
-      const filename = encoder.encode(path);
-      const uncompressedData = encoder.encode(content);
-      const uncompressedSize = uncompressedData.length;
-      const crc = this.crc32(uncompressedData);
-      
-      const data = await this.compressData(uncompressedData);
-
-      // Local file header
-      const header = new Uint8Array(30 + filename.length);
-      const view = new DataView(header.buffer);
-      view.setUint32(0, 0x04034b50, true);  // signature
-      view.setUint16(4, 20, true);           // version needed
-      view.setUint16(6, 0, true);            // flags
-      view.setUint16(8, 8, true);            // compression (Deflate)
-      view.setUint16(10, 0, true);           // mod time
-      view.setUint16(12, 0, true);           // mod date
-      view.setUint32(14, crc, true);         // CRC-32 (uncompressed)
-      view.setUint32(18, data.length, true); // compressed size
-      view.setUint32(22, uncompressedSize, true); // uncompressed size
-      view.setUint16(26, filename.length, true); // filename length
-      view.setUint16(28, 0, true);           // extra field length
-      header.set(filename, 30);
-
-      entries.push({ filename, data, offset, uncompressedSize, crc });
-      chunks.push(header, data);
-      offset += header.length + data.length;
-    }
-
-    // Central directory
-    const cdChunks: Uint8Array[] = [];
-    let cdSize = 0;
-
-    for (const entry of entries) {
-      const cd = new Uint8Array(46 + entry.filename.length);
-      const view = new DataView(cd.buffer);
-      view.setUint32(0, 0x02014b50, true);   // central dir signature
-      view.setUint16(4, 20, true);            // version made by
-      view.setUint16(6, 20, true);            // version needed
-      view.setUint16(8, 0, true);             // flags
-      view.setUint16(10, 8, true);            // compression (Deflate)
-      view.setUint16(12, 0, true);            // mod time
-      view.setUint16(14, 0, true);            // mod date
-      view.setUint32(16, entry.crc, true);    // CRC-32
-      view.setUint32(20, entry.data.length, true); // compressed size
-      view.setUint32(24, entry.uncompressedSize, true); // uncompressed size
-      view.setUint16(28, entry.filename.length, true); // filename length
-      view.setUint16(30, 0, true);            // extra field length
-      view.setUint16(32, 0, true);            // comment length
-      view.setUint16(34, 0, true);            // disk start
-      view.setUint16(36, 0, true);            // internal attributes
-      view.setUint32(38, 0, true);            // external attributes
-      view.setUint32(42, entry.offset, true); // local header offset
-      cd.set(entry.filename, 46);
-      cdChunks.push(cd);
-      cdSize += cd.length;
-    }
-
-    // End of central directory record
-    const eocd = new Uint8Array(22);
-    const eocdView = new DataView(eocd.buffer);
-    eocdView.setUint32(0, 0x06054b50, true);
-    eocdView.setUint16(4, 0, true);
-    eocdView.setUint16(6, 0, true);
-    eocdView.setUint16(8, entries.length, true);
-    eocdView.setUint16(10, entries.length, true);
-    eocdView.setUint32(12, cdSize, true);
-    eocdView.setUint32(16, offset, true);
-    eocdView.setUint16(20, 0, true);
-
-    const allChunks = [...chunks, ...cdChunks, eocd];
-    const total = allChunks.reduce((s, c) => s + c.length, 0);
-    const result = new Uint8Array(total);
-    let pos = 0;
-    for (const chunk of allChunks) {
-      result.set(chunk, pos);
-      pos += chunk.length;
-    }
-    return result;
-  }
-
-  private crc32(data: Uint8Array): number {
-    let crc = 0xffffffff;
-    for (const byte of data) {
-      crc ^= byte;
-      for (let i = 0; i < 8; i++) {
-        crc = (crc & 1) ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
-      }
-    }
-    return (crc ^ 0xffffffff) >>> 0;
-  }
 }

@@ -1,13 +1,14 @@
-import { createZipStreamParser, ZipEntry } from './zip-stream';
+import { createZipStreamParser, ZipEntry, createByteLimitStream } from './zip-stream';
 import { createXmlStreamParser, XmlToken } from './xml-stream';
-import { parseWorksheet, CellValue } from './worksheet-parser';
+import { parseWorksheet, ParseResult } from './worksheet-parser';
 
 export interface ParseOptions {
   sheetName?: string;
+  maxUncompressedBytes?: number; // Zip bomb protection limit
 }
 
 export class SheetReader {
-  async parse(stream: ReadableStream<Uint8Array>, options?: ParseOptions) {
+  async parse(stream: ReadableStream<Uint8Array>, options?: ParseOptions): Promise<ParseResult> {
     const zipStream = stream.pipeThrough(createZipStreamParser());
     const zipReader = zipStream.getReader();
 
@@ -61,6 +62,9 @@ export class SheetReader {
                 worksheetStream = entry.stream;
                 if (entry.compressionMethod === 8) {
                   worksheetStream = worksheetStream.pipeThrough(new DecompressionStream('deflate-raw') as any);
+                }
+                if (options?.maxUncompressedBytes) {
+                  worksheetStream = worksheetStream.pipeThrough(createByteLimitStream(options.maxUncompressedBytes));
                 }
                 // Resolve the promise so the caller gets the stream immediately!
                 resolve(worksheetStream);

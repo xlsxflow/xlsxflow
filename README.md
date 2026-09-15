@@ -163,6 +163,16 @@ gantt
 
 ## 📋 Changelog
 
+### v1.0.0 (Official Release)
+> True O(1) Streaming Architecture for Writers & Editors
+
+- **O(1) Memory Streaming Writer & Editor** — Ripped out in-memory buffers. `SheetWriter` and `SheetEditor` now use `ZipStreamWriter` via Data Descriptors (Bit 3) to generate dynamic ZIP archives entirely on-the-fly, reducing memory overhead to O(1) flat.
+- **Dynamic Date Deserialization** — Robust detection of `numFmtId` across workbooks to reliably auto-convert numeric epoch dates back into strict ISO-8601 strings during stream parsing.
+- **Data Descriptors & Signature Scanning** — Fixed limitations with forward-only zip stream parsers by scanning for Data Descriptor headers `0x08074b50`, achieving zero-seek streaming parsing of workbooks.
+- **Production Ready** — Validated by extensive tests and rigorous benchmarking.
+
+---
+
 ### v0.3.0-beta
 > Multi-Sheet Support, Auto Date Deserialization, & Massive XML Parsing Optimization
 

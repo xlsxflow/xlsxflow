@@ -80,8 +80,21 @@ export interface StyledCell {
 
 export type Row = (CellValue | StyledCell)[];
 
+export interface DataValidation {
+  sqref: string; // e.g. "A1:A10"
+  type?: 'list' | 'whole' | 'decimal' | 'date' | 'time' | 'textLength' | 'custom';
+  allowBlank?: boolean;
+  showInputMessage?: boolean;
+  showErrorMessage?: boolean;
+  formula1?: string;
+  formula2?: string;
+}
+
 export interface SheetOptions {
   name?: string;
   columnWidths?: number[]; // in characters
   conditionalFormats?: ConditionalFormat[];
+  dataValidations?: DataValidation[];
+  mergeCells?: string[]; // e.g. ["A1:C1", "D1:E2"]
+  freezePanes?: { row?: number, col?: number };
 }

@@ -1,7 +1,22 @@
 export type FormulaResult = number | string | boolean | null;
 
-// Client-side formula evaluator that calculates values before exporting.
-// This injects both <f> (formula string) and <v> (cached value) for cross-platform fidelity.
+type TokenType = 'NUMBER' | 'STRING' | 'CELL' | 'RANGE' | 'IDENTIFIER' | 'OP' | 'PAREN_L' | 'PAREN_R' | 'COMMA';
+
+interface Token {
+  type: TokenType;
+  value: string;
+}
+
+interface ASTNode {
+  type: 'NUMBER' | 'STRING' | 'CELL' | 'RANGE' | 'CALL' | 'BINARY';
+  value?: any;
+  left?: ASTNode;
+  right?: ASTNode;
+  operator?: string;
+  name?: string;
+  args?: ASTNode[];
+}
+
 export class FormulaEngine {
   private cells: Map<string, FormulaResult> = new Map();
 
@@ -9,7 +24,6 @@ export class FormulaEngine {
     this.cells.clear();
   }
 
-  // Load a grid of values for formula context (keyed by cell ref e.g. "A1")
   loadData(data: (FormulaResult)[][], startRow = 1) {
     data.forEach((row, ri) => {
       row.forEach((cell, ci) => {
@@ -19,83 +33,233 @@ export class FormulaEngine {
     });
   }
 
-  // Evaluate a formula and return its result
   evaluate(formula: string): FormulaResult {
-    const clean = formula.replace(/^=/, '').trim();
-
-    // SUM(range)
-    const sumMatch = clean.match(/^SUM\(([A-Z]+\d+):([A-Z]+\d+)\)$/i);
-    if (sumMatch) return this.sum(sumMatch[1], sumMatch[2]);
-
-    // AVERAGE(range)
-    const avgMatch = clean.match(/^AVERAGE\(([A-Z]+\d+):([A-Z]+\d+)\)$/i);
-    if (avgMatch) return this.average(avgMatch[1], avgMatch[2]);
-
-    // COUNT(range)
-    const countMatch = clean.match(/^COUNT\(([A-Z]+\d+):([A-Z]+\d+)\)$/i);
-    if (countMatch) return this.count(countMatch[1], countMatch[2]);
-
-    // MAX(range)
-    const maxMatch = clean.match(/^MAX\(([A-Z]+\d+):([A-Z]+\d+)\)$/i);
-    if (maxMatch) return this.max(maxMatch[1], maxMatch[2]);
-
-    // MIN(range)
-    const minMatch = clean.match(/^MIN\(([A-Z]+\d+):([A-Z]+\d+)\)$/i);
-    if (minMatch) return this.min(minMatch[1], minMatch[2]);
-
-    // Literal cell reference
-    if (/^[A-Z]+\d+$/i.test(clean)) {
-      return this.cells.get(clean.toUpperCase()) ?? null;
+    try {
+      const clean = formula.replace(/^=/, '').trim();
+      if (!clean) return null;
+      const tokens = this.tokenize(clean);
+      const ast = this.parse(tokens);
+      return this.evaluateAst(ast);
+    } catch (e) {
+      console.warn(`Formula parse error for "${formula}":`, e);
+      return null;
     }
+  }
 
+  private tokenize(expr: string): Token[] {
+    const tokens: Token[] = [];
+    let i = 0;
+    while (i < expr.length) {
+      let char = expr[i];
+      if (/\s/.test(char)) { i++; continue; }
+      if (char === '(') { tokens.push({ type: 'PAREN_L', value: '(' }); i++; continue; }
+      if (char === ')') { tokens.push({ type: 'PAREN_R', value: ')' }); i++; continue; }
+      if (char === ',') { tokens.push({ type: 'COMMA', value: ',' }); i++; continue; }
+      if (/[+\-*/^<>=]/.test(char)) {
+        let op = char;
+        if (char === '<' || char === '>') {
+          if (expr[i + 1] === '=') { op += '='; i++; }
+          else if (char === '<' && expr[i + 1] === '>') { op += '>'; i++; }
+        }
+        tokens.push({ type: 'OP', value: op });
+        i++;
+        continue;
+      }
+      if (char === '"' || char === "'") {
+        const quote = char;
+        let str = '';
+        i++;
+        while (i < expr.length && expr[i] !== quote) { str += expr[i++]; }
+        i++;
+        tokens.push({ type: 'STRING', value: str });
+        continue;
+      }
+      if (/[0-9.]/.test(char)) {
+        let num = '';
+        while (i < expr.length && /[0-9.]/.test(expr[i])) { num += expr[i++]; }
+        tokens.push({ type: 'NUMBER', value: num });
+        continue;
+      }
+      if (/[A-Za-z]/.test(char)) {
+        let id = '';
+        while (i < expr.length && /[A-Za-z0-9]/.test(expr[i])) { id += expr[i++]; }
+        if (i < expr.length && expr[i] === ':') {
+          i++;
+          let endId = '';
+          while (i < expr.length && /[A-Za-z0-9]/.test(expr[i])) { endId += expr[i++]; }
+          tokens.push({ type: 'RANGE', value: id.toUpperCase() + ':' + endId.toUpperCase() });
+        } else if (/^[A-Z]+\d+$/i.test(id)) {
+          tokens.push({ type: 'CELL', value: id.toUpperCase() });
+        } else {
+          tokens.push({ type: 'IDENTIFIER', value: id.toUpperCase() });
+        }
+        continue;
+      }
+      throw new Error(`Unknown character at ${i}: ${char}`);
+    }
+    return tokens;
+  }
+
+  private parse(tokens: Token[]): ASTNode {
+    let pos = 0;
+
+    const parsePrimary = (): ASTNode => {
+      const token = tokens[pos];
+      if (!token) throw new Error('Unexpected end of input');
+      if (token.type === 'NUMBER') { pos++; return { type: 'NUMBER', value: parseFloat(token.value) }; }
+      if (token.type === 'STRING') { pos++; return { type: 'STRING', value: token.value }; }
+      if (token.type === 'CELL') { pos++; return { type: 'CELL', value: token.value }; }
+      if (token.type === 'RANGE') { pos++; return { type: 'RANGE', value: token.value }; }
+      if (token.type === 'IDENTIFIER') {
+        const name = token.value;
+        pos++;
+        if (pos < tokens.length && tokens[pos].type === 'PAREN_L') {
+          pos++; // skip '('
+          const args: ASTNode[] = [];
+          if (tokens[pos].type !== 'PAREN_R') {
+            args.push(parseExpression());
+            while (pos < tokens.length && tokens[pos].type === 'COMMA') {
+              pos++;
+              args.push(parseExpression());
+            }
+          }
+          if (tokens[pos].type !== 'PAREN_R') throw new Error('Expected )');
+          pos++;
+          return { type: 'CALL', name, args };
+        }
+        // Handle true/false constants
+        if (name === 'TRUE') return { type: 'NUMBER', value: true }; 
+        if (name === 'FALSE') return { type: 'NUMBER', value: false };
+        throw new Error(`Unknown identifier ${name}`);
+      }
+      if (token.type === 'PAREN_L') {
+        pos++;
+        const node = parseExpression();
+        if (tokens[pos].type !== 'PAREN_R') throw new Error('Expected )');
+        pos++;
+        return node;
+      }
+      throw new Error(`Unexpected token ${token.value}`);
+    };
+
+    const parsePower = (): ASTNode => {
+      let node = parsePrimary();
+      while (pos < tokens.length && tokens[pos].value === '^') {
+        const op = tokens[pos].value;
+        pos++;
+        node = { type: 'BINARY', operator: op, left: node, right: parsePrimary() };
+      }
+      return node;
+    };
+
+    const parseFactor = (): ASTNode => {
+      let node = parsePower();
+      while (pos < tokens.length && (tokens[pos].value === '*' || tokens[pos].value === '/')) {
+        const op = tokens[pos].value;
+        pos++;
+        node = { type: 'BINARY', operator: op, left: node, right: parsePower() };
+      }
+      return node;
+    };
+
+    const parseTerm = (): ASTNode => {
+      let node = parseFactor();
+      while (pos < tokens.length && (tokens[pos].value === '+' || tokens[pos].value === '-')) {
+        const op = tokens[pos].value;
+        pos++;
+        node = { type: 'BINARY', operator: op, left: node, right: parseFactor() };
+      }
+      return node;
+    };
+
+    const parseComparison = (): ASTNode => {
+      let node = parseTerm();
+      while (pos < tokens.length && ['=', '<>', '<', '>', '<=', '>='].includes(tokens[pos].value)) {
+        const op = tokens[pos].value;
+        pos++;
+        node = { type: 'BINARY', operator: op, left: node, right: parseTerm() };
+      }
+      return node;
+    };
+
+    const parseExpression = (): ASTNode => {
+      return parseComparison();
+    };
+
+    return parseExpression();
+  }
+
+  private evaluateAst(node: ASTNode): any {
+    if (node.type === 'NUMBER') return node.value;
+    if (node.type === 'STRING') return node.value;
+    if (node.type === 'CELL') return this.cells.get(node.value) ?? 0;
+    if (node.type === 'RANGE') return this.getRangeValues(node.value);
+    
+    if (node.type === 'BINARY') {
+      const left = this.evaluateAst(node.left!);
+      const right = this.evaluateAst(node.right!);
+      
+      const lNum = Number(left);
+      const rNum = Number(right);
+
+      switch (node.operator) {
+        case '+': return lNum + rNum;
+        case '-': return lNum - rNum;
+        case '*': return lNum * rNum;
+        case '/': return rNum === 0 ? '#DIV/0!' : lNum / rNum;
+        case '^': return Math.pow(lNum, rNum);
+        case '=': return left === right;
+        case '<>': return left !== right;
+        case '>': return lNum > rNum;
+        case '<': return lNum < rNum;
+        case '>=': return lNum >= rNum;
+        case '<=': return lNum <= rNum;
+      }
+    }
+    
+    if (node.type === 'CALL') {
+      const args = node.args!.map(a => this.evaluateAst(a));
+      switch (node.name) {
+        case 'SUM': return this.flatten(args).reduce((a, b) => a + Number(b), 0);
+        case 'AVERAGE': {
+          const flat = this.flatten(args);
+          return flat.length ? flat.reduce((a, b) => a + Number(b), 0) / flat.length : 0;
+        }
+        case 'COUNT': return this.flatten(args).length;
+        case 'MAX': return Math.max(...this.flatten(args).map(Number));
+        case 'MIN': return Math.min(...this.flatten(args).map(Number));
+        case 'IF': return args[0] ? args[1] : args[2];
+        case 'CONCATENATE': return this.flatten(args).join('');
+      }
+    }
     return null;
   }
 
-  private getRangeValues(startRef: string, endRef: string): number[] {
+  private flatten(arr: any[]): any[] {
+    return arr.reduce((acc, val) => Array.isArray(val) ? acc.concat(this.flatten(val)) : acc.concat(val), []);
+  }
+
+  private getRangeValues(range: string): any[] {
+    const [startRef, endRef] = range.split(':');
     const [startCol, startRow] = this.parseRef(startRef);
     const [endCol, endRow] = this.parseRef(endRef);
-    const values: number[] = [];
+    const values: any[] = [];
     for (let r = startRow; r <= endRow; r++) {
       for (let c = startCol; c <= endCol; c++) {
         const ref = this.toRef(r, c - 1);
-        const val = this.cells.get(ref);
-        if (typeof val === 'number') values.push(val);
+        values.push(this.cells.get(ref) ?? 0);
       }
     }
     return values;
   }
 
-  private sum(startRef: string, endRef: string): number {
-    return this.getRangeValues(startRef, endRef).reduce((a, b) => a + b, 0);
-  }
-
-  private average(startRef: string, endRef: string): number {
-    const vals = this.getRangeValues(startRef, endRef);
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
-  }
-
-  private count(startRef: string, endRef: string): number {
-    return this.getRangeValues(startRef, endRef).length;
-  }
-
-  private max(startRef: string, endRef: string): number {
-    return Math.max(...this.getRangeValues(startRef, endRef));
-  }
-
-  private min(startRef: string, endRef: string): number {
-    return Math.min(...this.getRangeValues(startRef, endRef));
-  }
-
-  // Convert "A1" -> [colNum, rowNum]
   private parseRef(ref: string): [number, number] {
     const match = ref.match(/^([A-Z]+)(\d+)$/i)!;
-    const col = match[1].toUpperCase().split('').reduce((acc, ch) =>
-      acc * 26 + (ch.charCodeAt(0) - 64), 0);
+    const col = match[1].toUpperCase().split('').reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0);
     const row = parseInt(match[2], 10);
     return [col, row];
   }
 
-  // colIndex is 0-based
   private toRef(row: number, colIndex: number): string {
     let col = '';
     let c = colIndex + 1;

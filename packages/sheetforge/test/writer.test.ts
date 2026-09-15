@@ -1,6 +1,27 @@
 import { describe, it, expect } from 'vitest';
 import { SheetWriter } from '../src/core/writer';
 import { Row } from '../src/pro/types';
+import { createZipStreamParser } from '../src/core/zip-stream';
+
+// Helper to consume stream into Uint8Array
+async function streamToUint8Array(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+  }
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    result.set(c, offset);
+    offset += c.length;
+  }
+  return result;
+}
 
 describe('SheetWriter', () => {
   it('should generate a valid XLSX buffer with Deflate compression', async () => {
@@ -10,7 +31,8 @@ describe('SheetWriter', () => {
       [100, 200]
     ];
 
-    const buffer = await writer.write(rows);
+    const stream = writer.write(rows);
+    const buffer = await streamToUint8Array(stream);
     expect(buffer).toBeInstanceOf(Uint8Array);
     
     // Check ZIP signature (PK\x03\x04)
@@ -22,7 +44,8 @@ describe('SheetWriter', () => {
 
   it('should write a non-empty binary that contains sheet XML markers', async () => {
     const writer = new SheetWriter();
-    const bytes = await writer.write([['Hello', 'World'], [1, 2]]);
+    const stream = writer.write([['Hello', 'World'], [1, 2]]);
+    const bytes = await streamToUint8Array(stream);
     const text = new TextDecoder().decode(bytes);
     
     expect(text).toContain('[Content_Types].xml');
@@ -30,10 +53,11 @@ describe('SheetWriter', () => {
   });
   it('should inject formula string and cached value', async () => {
     const writer = new SheetWriter();
-    const bytes = await writer.write([
+    const stream = writer.write([
       [1, 2, 3],
       [{ value: null, formula: '=SUM(A1:C1)' }]
     ]);
+    const bytes = await streamToUint8Array(stream);
     
     // We can just verify it generated a valid ZIP
     expect(bytes[0]).toBe(0x50); // P
@@ -42,7 +66,8 @@ describe('SheetWriter', () => {
 
   it('should handle booleans and null cells', async () => {
     const writer = new SheetWriter();
-    const bytes = await writer.write([[true, false, null]]);
+    const stream = writer.write([[true, false, null]]);
+    const bytes = await streamToUint8Array(stream);
     
     // We can just verify it generated a valid ZIP
     expect(bytes[0]).toBe(0x50); // P
@@ -53,7 +78,8 @@ describe('SheetWriter', () => {
     const writer = new SheetWriter();
     writer.addSheet('First', [[1, 2]]);
     writer.addSheet('Second', [['A', 'B']]);
-    const bytes = await writer.write();
+    const stream = writer.write();
+    const bytes = await streamToUint8Array(stream);
     expect(bytes[0]).toBe(0x50); // P
     expect(bytes[1]).toBe(0x4b); // K
     expect(bytes.length).toBeGreaterThan(100);
@@ -65,7 +91,8 @@ describe('SheetWriter', () => {
     writer.addSheet('Dates', [[
       { value: dateNum, style: { numFmt: 'yyyy-mm-dd' } }
     ]]);
-    const bytes = await writer.write();
+    const stream = writer.write();
+    const bytes = await streamToUint8Array(stream);
 
     // Verify via Reader
     const { SheetReader } = await import('../src/core/index');
@@ -78,25 +105,83 @@ describe('SheetWriter', () => {
       console.log('STYLES MAP:', map);
     };
     
-    const stream = new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
+    const streamReader = new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
     
     let parsedRows: any[] = [];
-    for await (const row of await reader.parse(stream)) {
+    for await (const row of await reader.parse(streamReader)) {
       parsedRows.push(row);
     }
     
     // 45000 in Excel is 2023-03-15T00:00:00.000Z
     expect(parsedRows[0][0]).toBe('2023-03-15T00:00:00.000Z');
   });
+  it('should support freezePanes and mergeCells', async () => {
+    const writer = new SheetWriter();
+    writer.addSheet('Complex', [[1, 2], [3, 4]], {
+      freezePanes: { row: 1, col: 1 },
+      mergeCells: ['A1:B1']
+    });
+    const stream = writer.write();
+    const bytes = await streamToUint8Array(stream);
+
+    const { SheetReader } = await import('../src/core/index');
+    const reader = new SheetReader();
+    const streamReader = new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
+    
+    const result = await reader.parse(streamReader);
+    for await (const row of result) { } // consume stream
+    
+    const meta = await result.getMetadata();
+    expect(meta.mergedCells).toEqual(['A1:B1']);
+  });
+
+  it('should generate dataValidations correctly', async () => {
+    const writer = new SheetWriter();
+    writer.addSheet('Validation', [['Select Item']], {
+      dataValidations: [
+        { sqref: 'A2:A10', type: 'list', formula1: '"Apple,Banana,Orange"', showErrorMessage: true }
+      ]
+    });
+    const stream = writer.write();
+    const bytes = await streamToUint8Array(stream);
+    
+    // Extract sheet1.xml from the zip to verify its content
+    const streamReader = new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
+    const zipStream = streamReader.pipeThrough(createZipStreamParser());
+    const zipReader = zipStream.getReader();
+    let sheetXml = '';
+    
+    while (true) {
+      const { done, value } = await zipReader.read();
+      if (done) break;
+      if (value.filename === 'xl/worksheets/sheet1.xml') {
+        let s = value.stream;
+        if (value.compressionMethod === 8) s = s.pipeThrough(new DecompressionStream('deflate-raw') as any);
+        const textReader = s.pipeThrough(new TextDecoderStream() as any).getReader();
+        while (true) {
+          const res = await textReader.read();
+          if (res.done) break;
+          sheetXml += res.value;
+        }
+      } else {
+        await value.stream.pipeTo(new WritableStream());
+      }
+    }
+    
+    expect(sheetXml).toContain('<dataValidations count="1">');
+    expect(sheetXml).toContain('<dataValidation sqref="A2:A10" type="list" showErrorMessage="1">');
+    expect(sheetXml).toContain('<formula1>&quot;Apple,Banana,Orange&quot;</formula1>');
+  });
 });
 
 describe('FormulaEngine (via SheetWriter)', () => {
   it('should correctly compute SUM in exported binary', async () => {
     const writer = new SheetWriter();
-    const bytes = await writer.write([
+    const stream = writer.write([
       [1, 2, 3],
       [{ value: null, formula: '=SUM(A1:C1)' }]
     ]);
+    const bytes = await streamToUint8Array(stream);
     expect(bytes.length).toBeGreaterThan(100);
   });
 });

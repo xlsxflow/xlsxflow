@@ -18,13 +18,24 @@ export class StyleEngine {
     cellXfs: [],
   };
 
-  // Serialize a CellStyle into an xfId (index into cellXfs array)
   registerStyle(style: CellStyle): number {
     const fontId = style.font ? this.registerFont(style.font) : 0;
     const fillId = style.fill ? this.registerFill(style.fill) : 0;
     const borderId = style.border ? this.registerBorder(style.border) : 0;
     const numFmtId = style.numFmt ? this.registerNumFmt(style.numFmt) : 0;
     const alignmentXml = style.alignment ? this.buildAlignmentXml(style.alignment) : '';
+
+    const existingIdx = this.registry.cellXfs.findIndex(xf => 
+      xf.fontId === fontId && 
+      xf.fillId === fillId && 
+      xf.borderId === borderId && 
+      xf.numFmtId === numFmtId && 
+      xf.alignmentXml === alignmentXml
+    );
+
+    if (existingIdx !== -1) {
+      return existingIdx + 1;
+    }
 
     const xf = { fontId, fillId, borderId, numFmtId, alignmentXml };
     this.registry.cellXfs.push(xf);
