@@ -50,7 +50,7 @@ export class SheetEditor {
               const modifiedStream = s
                 .pipeThrough(textDecoder as any)
                 .pipeThrough(injectStream)
-                .pipeThrough(textEncoder as any);
+                .pipeThrough(textEncoder as any) as unknown as ReadableStream<Uint8Array>;
               
               await zipOut.addFile(entry.filename, modifiedStream);
             } else {

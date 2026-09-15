@@ -25,17 +25,30 @@ async function runScenario(
 
   // --- WRITE ---
   const writer = new SheetWriter();
-  const rows: (string | number)[][] = [];
-  for (let r = 0; r < ROWS; r++) {
-    rows.push(generateRow(r));
+  
+  async function* generateRows() {
+    for (let r = 0; r < ROWS; r++) {
+      yield generateRow(r);
+    }
   }
 
   if (global.gc) global.gc();
   const startWrite = performance.now();
-  const buffer = await writer.write(rows as any);
-  fs.writeFileSync(filepath, buffer);
+  const stream = writer.write(generateRows() as any);
+  
+  // Stream to file
+  const outStream = fs.createWriteStream(filepath);
+  const streamReader = stream.getReader();
+  while (true) {
+    const { done, value } = await streamReader.read();
+    if (done) break;
+    outStream.write(value);
+  }
+  outStream.end();
+  await new Promise<void>(r => outStream.on('finish', () => r()));
+
   const writeMs = performance.now() - startWrite;
-  const writeMb = buffer.length / 1024 / 1024;
+  const writeMb = fs.statSync(filepath).size / 1024 / 1024;
 
   // --- READ ---
   if (global.gc) global.gc();

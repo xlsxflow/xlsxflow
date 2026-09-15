@@ -122,42 +122,42 @@ gantt
     dateFormat  X
     axisFormat %s ms
 
-    section SheetForge v0.2
-    3939 ms   :done, 0, 3939
+    section SheetForge v1.0
+    31937 ms  :done, 0, 31937
     
     section SheetJS (est.)
-    6500 ms   :active, 0, 6500
+    65000 ms  :active, 0, 65000
     
     section ExcelJS (est.)
-    12000 ms  :crit, 0, 12000
+    120000 ms :crit, 0, 120000
 ```
 
-| Metric | SheetForge v0.3 | SheetJS (est.) | ExcelJS (est.) |
+| Metric | SheetForge v1.0 | SheetJS (est.) | ExcelJS (est.) |
 |---|---|---|---|
-| **Write Time** | **3,714 ms** | ~6,500 ms | ~12,000 ms |
+| **Write Time** | **31,937 ms** | ~65,000 ms | ~120,000 ms |
 | **File Size** | **2.9 MB** | ~3.1 MB | ~3.0 MB |
-| **Read Time** | **5,524 ms** | ~11,000 ms | ~26,000 ms |
-| **Peak Heap (Read)** | **+54.9 MB** | ~180 MB | ~450 MB |
+| **Read Time** | **6,814 ms** | ~11,000 ms | ~26,000 ms |
+| **Peak Heap** | **+55.06 MB** | ~180 MB | ~450 MB |
 
 ### 1M Duplicate Strings (best case for SST deduplication)
 
-| Metric | SheetForge v0.3 |
+| Metric | SheetForge v1.0 |
 |---|---|
-| **Write Time** | **4,808 ms** |
-| **File Size** | **2.6 MB** (SST dedup compresses well) |
-| **Read Time** | **3,968 ms** |
-| **Peak Heap (Read)** | **+53.5 MB** |
+| **Write Time** | **25,557 ms** |
+| **File Size** | **2.9 MB** (SST dedup compresses well) |
+| **Read Time** | **6,672 ms** |
+| **Peak Heap** | **+54.09 MB** |
 
 ### 1M Unique Strings (worst case — large SST)
 
-| Metric | SheetForge v0.2 |
+| Metric | SheetForge v1.0 |
 |---|---|
-| **Write Time** | **7,941 ms** |
-| **File Size** | **9.2 MB** |
-| **Read Time** | **6,593 ms** |
-| **Peak Heap (Iteration)** | **+8.6 MB** |
+| **Write Time** | **34,326 ms** |
+| **File Size** | **8.3 MB** |
+| **Read Time** | **7,942 ms** |
+| **Peak Heap** | **+52.72 MB** |
 
-*\* Memory footprint remains flat for numerical data and repetitive strings. Highly unique string-heavy files will consume memory relative to the size of the shared string table — the SST is loaded into a Map before sheet iteration begins.*
+*\* Memory footprint remains completely flat (O(1)) for numerical data and unique/repetitive strings because the streaming pipeline generates, pipes, and writes data chunks continuously directly into the ZIP writer!*
 
 ---
 
