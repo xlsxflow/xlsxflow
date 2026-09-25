@@ -63,7 +63,7 @@ function resolveTarget(baseDir: string, target: string): string {
   return out.join('/');
 }
 
-interface Relationship { id: string; type: string; path: string; external: boolean }
+export interface Relationship { id: string; type: string; path: string; external: boolean }
 
 function parseRels(relsXml: string, baseDir: string): Relationship[] {
   const rels: Relationship[] = [];
@@ -84,6 +84,7 @@ const relsPathOf = (path: string) => `${dirOf(path)}_rels/${path.slice(path.last
 const byType = (rels: Relationship[], suffix: string) => rels.find(r => !r.external && r.type.endsWith(suffix))?.path;
 
 export interface WorkbookParts {
+  workbookPath: string;
   workbookXml: string;
   sheets: Map<string, string>;   // sheet name -> ZIP entry path, in tab order
   sharedStrings?: string;
@@ -106,14 +107,19 @@ export async function resolveWorkbookParts(readText: (path: string) => Promise<s
     if (name && rel) sheets.set(name, rel.path);
   }
   return {
-    workbookXml, sheets,
+    workbookPath, workbookXml, sheets,
     sharedStrings: byType(rels, '/sharedStrings'), styles: byType(rels, '/styles'), theme: byType(rels, '/theme'),
   };
 }
 
+// The relationships of any part (its _rels/<name>.rels), targets resolved to ZIP paths unless external
+export async function partRelationships(readText: (path: string) => Promise<string>, partPath: string): Promise<Relationship[]> {
+  return parseRels(await readText(relsPathOf(partPath)), dirOf(partPath));
+}
+
 // Relationship id -> target of a worksheet's hyperlinks (from its .rels part)
 export async function hyperlinkTargets(readText: (path: string) => Promise<string>, sheetPath: string): Promise<Map<string, string>> {
-  const rels = parseRels(await readText(relsPathOf(sheetPath)), dirOf(sheetPath));
+  const rels = await partRelationships(readText, sheetPath);
   return new Map(rels.filter(r => r.type.endsWith('/hyperlink')).map(r => [r.id, r.path]));
 }
 
@@ -161,31 +167,78 @@ export function colLetter(index: number): string {
 // (LOG10(), ATAN2()) and unquoted sheet names (Q1!A1) from being taken for references.
 const REF_RE = /(?<![A-Za-z0-9_.$])(?:(\$?)([A-Za-z]{1,3})(\$?)(\d+)(?![A-Za-z0-9_(!])|(\$?)([A-Za-z]{1,3}):(\$?)([A-Za-z]{1,3})(?![A-Za-z0-9_(!])|(\$?)(\d+):(\$?)(\d+)(?![0-9!]))/g;
 
+// How a reference sits in the formula: alone, or as the first / last cell of a range
+export type RefRole = 'single' | 'start' | 'end';
+// Returns the new 0-based column / 1-based row, or null when the reference no longer exists (#REF!).
+// `sheet` is the sheet qualifier written before the reference, if any (unquoted).
+export type RefMapper = (value: number, absolute: boolean, role: RefRole, sheet: string | undefined) => number | null;
+
+const unquoteSheet = (quoted: string) => quoted.slice(1, -1).replace(/''/g, "'");
+
+// Rewrites every A1 reference in a formula through mapCol / mapRow. String literals are left alone.
+// A reference moved off the sheet, or a range turned inside out, becomes #REF!.
+export function mapFormulaRefs(formula: string, mapCol: RefMapper, mapRow: RefMapper): string {
+  const parts = formula.split(/("(?:[^"]|"")*"|'(?:[^']|'')*')/);
+  for (let i = 0; i < parts.length; i += 2) {
+    const part = parts[i];
+    let prevEnd = -1;
+    let prevSheet: string | undefined;
+    let prevRow = 0;
+    parts[i] = part.replace(REF_RE, (m: string, ...g: any[]) => {
+      const offset: number = g[12];
+      const before = part.slice(0, offset);
+      const isEnd = before.endsWith(':') && prevEnd === offset - 1;
+      let sheet: string | undefined;
+      if (isEnd) sheet = prevSheet;
+      else if (before.endsWith('!')) {
+        sheet = /([A-Za-z0-9_.\u00C0-\uFFFF]+)!$/.exec(before)?.[1]
+          ?? (offset === 1 && i > 0 && parts[i - 1].startsWith("'") ? unquoteSheet(parts[i - 1]) : undefined);
+      }
+      const role: RefRole = isEnd ? 'end' : part[offset + m.length] === ':' ? 'start' : 'single';
+      const col = (abs: string, letters: string, r: RefRole) => {
+        const c = mapCol(colIndex(letters), !!abs, r, sheet);
+        return c !== null && c >= 0 && c < MAX_COLUMNS ? abs + colLetter(c) : null;
+      };
+      const row = (abs: string, digits: string, r: RefRole) => {
+        const n = mapRow(parseInt(digits, 10), !!abs, r, sheet);
+        return n !== null && n >= 1 && n <= MAX_ROWS ? n : null;
+      };
+      prevEnd = offset + m.length;
+      prevSheet = sheet;
+      let out: string | null;
+      if (g[1] !== undefined) {
+        const c = col(g[0], g[1], role), r = row(g[2], g[3], role);
+        // The end of a range must not land above its start (rows removed from under it)
+        const inverted = r !== null && role === 'end' && r < prevRow;
+        prevRow = r ?? 0;
+        out = c === null || r === null || inverted ? null : c + g[2] + r;
+      } else if (g[5] !== undefined) {
+        const a = col(g[4], g[5], 'start'), b = col(g[6], g[7], 'end');
+        out = a === null || b === null ? null : `${a}:${b}`;
+      } else {
+        const a = row(g[8], g[9], 'start'), b = row(g[10], g[11], 'end');
+        out = a === null || b === null || b < a ? null : `${g[8]}${a}:${g[10]}${b}`;
+      }
+      return out ?? '#REF!';
+    // A range with a dead end is dead as a whole
+    }).replace(/\$?[A-Za-z]{1,3}\$?\d+:#REF!|#REF!:\$?[A-Za-z]{1,3}\$?\d+/g, '#REF!');
+  }
+  return parts.join('');
+}
+
 // Moves the relative references of a formula by (rows, cols), as Excel does when it fills a shared
-// formula from its anchor cell into the other cells of the range. String literals and quoted sheet
-// names are left alone; a reference pushed off the sheet becomes #REF!.
+// formula from its anchor cell into the other cells of the range. Absolute parts ($A$1) stay put.
 export function shiftFormula(formula: string, rows: number, cols: number): string {
   if (!rows && !cols) return formula;
-  const col = (abs: string, letters: string) => {
-    if (abs) return abs + letters;
-    const c = colIndex(letters) + cols;
-    return c >= 0 && c < MAX_COLUMNS ? colLetter(c) : null;
-  };
-  const row = (abs: string, digits: string) => {
-    if (abs) return abs + digits;
-    const r = parseInt(digits, 10) + rows;
-    return r >= 1 && r <= MAX_ROWS ? String(r) : null;
-  };
-  const shift = (_m: string, ...g: string[]) => {
-    const out = g[1] !== undefined ? [col(g[0], g[1]), row(g[2], g[3])]
-      : g[5] !== undefined ? [col(g[4], g[5]), ':', col(g[6], g[7])]
-      : [row(g[8], g[9]), ':', row(g[10], g[11])];
-    return out.includes(null) ? '#REF!' : out.join('');
-  };
-  return formula
-    .split(/("(?:[^"]|"")*"|'(?:[^']|'')*')/)
-    .map((part, i) => (i % 2 ? part : part.replace(REF_RE, shift)))
-    .join('');
+  return mapFormulaRefs(formula, (c, abs) => (abs ? c : c + cols), (r, abs) => (abs ? r : r + rows));
+}
+
+// Date -> Excel 1900-system serial (UTC). Serials 1..60 sit one day early because of Excel's
+// phantom 1900-02-29, mirroring excelToIsoDate on the read side.
+// Dates before 1900-01-01 have no serial in Excel; they come out as small/negative numbers.
+export function dateToSerial(d: Date): number {
+  const serial = (d.getTime() - Date.UTC(1899, 11, 30)) / 86400000;
+  return serial >= 2 && serial < 61 ? serial - 1 : serial;
 }
 
 // Inverse of decodeXString: literal "_xHHHH_" text is protected, and characters XML cannot carry

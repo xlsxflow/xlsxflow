@@ -8,6 +8,16 @@ export { StyleEngine } from './core/style-engine';
 export { FormulaEngine } from './core/formula-engine';
 export { ConditionalFormatter } from './core/conditional-formatter';
 
+// Low-level building blocks (used by @sheetforge/pro)
+export { readSharedStrings } from './core/index';
+export { ZipRandomAccessParser } from './core/zip-random-access';
+export { ZipStreamWriter } from './core/zip-stream-writer';
+export {
+  resolveWorkbookParts, partRelationships, mapFormulaRefs, shiftFormula, dateToSerial,
+  colIndex, colLetter, encodeXString, decodeXString,
+  type WorkbookParts, type Relationship, type RefMapper, type RefRole,
+} from './core/utils';
+
 export const SheetForge = {
   async readFile(filePath: string, options?: import('./core/index').ParseOptions) {
     const { createFileReader } = await import('./core/random-access');

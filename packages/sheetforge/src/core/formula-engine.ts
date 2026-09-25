@@ -40,8 +40,8 @@ export class FormulaEngine {
       const tokens = this.tokenize(clean);
       const ast = this.parse(tokens);
       return this.evaluateAst(ast);
-    } catch (e) {
-      console.warn(`Formula parse error for "${formula}":`, e);
+    } catch {
+      // Unsupported syntax (other sheets, names, unknown functions): no cached value; Excel computes it on open
       return null;
     }
   }
@@ -80,13 +80,16 @@ export class FormulaEngine {
         tokens.push({ type: 'NUMBER', value: num });
         continue;
       }
-      if (/[A-Za-z]/.test(char)) {
+      if (/[A-Za-z$]/.test(char)) {
+        // "$" only pins a reference when copied; it does not change what it points at
         let id = '';
-        while (i < expr.length && /[A-Za-z0-9]/.test(expr[i])) { id += expr[i++]; }
+        while (i < expr.length && /[A-Za-z0-9$]/.test(expr[i])) { id += expr[i++]; }
+        id = id.replace(/\$/g, '');
         if (i < expr.length && expr[i] === ':') {
           i++;
           let endId = '';
-          while (i < expr.length && /[A-Za-z0-9]/.test(expr[i])) { endId += expr[i++]; }
+          while (i < expr.length && /[A-Za-z0-9$]/.test(expr[i])) { endId += expr[i++]; }
+          endId = endId.replace(/\$/g, '');
           tokens.push({ type: 'RANGE', value: id.toUpperCase() + ':' + endId.toUpperCase() });
         } else if (/^[A-Z]+\d+$/i.test(id)) {
           tokens.push({ type: 'CELL', value: id.toUpperCase() });

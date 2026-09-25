@@ -46,6 +46,13 @@ function createByteLimitStream(maxBytes: number): TransformStream<Uint8Array, Ui
   });
 }
 
+// Shared string table (index -> text) of a workbook's sharedStrings part
+export async function readSharedStrings(stream: ReadableStream<Uint8Array>): Promise<Map<number, string>> {
+  const map = new Map<number, string>();
+  await SheetReader.parseSharedStrings(stream.pipeThrough(createXmlBatchParser()), map);
+  return map;
+}
+
 export class SheetReader {
   async parse(reader: RandomAccessReader, options?: ParseOptions): Promise<ParseResult> {
     const zip = new ZipRandomAccessParser(reader);
@@ -86,7 +93,7 @@ export class SheetReader {
     const sharedRichText = options?.richText ? new Map<number, RichTextRun[]>() : undefined;
     if (zip.has(sstPath)) {
       const xmlStream = limit(await zip.extractStream(sstPath)).pipeThrough(createXmlBatchParser());
-      await this.parseSharedStrings(xmlStream, sharedStrings, sharedRichText && { map: sharedRichText, color });
+      await SheetReader.parseSharedStrings(xmlStream, sharedStrings, sharedRichText && { map: sharedRichText, color });
     }
 
     // 4. Parse Worksheet
@@ -105,7 +112,7 @@ export class SheetReader {
     });
   }
 
-  private async parseSharedStrings(
+  static async parseSharedStrings(
     xmlTokenStream: ReadableStream<XmlToken | XmlToken[]>,
     map: Map<number, string>,
     rich?: { map: Map<number, RichTextRun[]>; color: ColorResolver }

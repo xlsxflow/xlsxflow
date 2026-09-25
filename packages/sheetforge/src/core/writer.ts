@@ -3,7 +3,7 @@ import { StyleEngine, fontXml } from './style-engine';
 import { ConditionalFormatter } from './conditional-formatter';
 import { FormulaEngine } from './formula-engine';
 import { ZipStreamWriter } from './zip-stream-writer';
-import { encodeXString, colLetter } from './utils';
+import { encodeXString, colLetter, dateToSerial } from './utils';
 
 function escapeXml(val: string): string {
   return val
@@ -19,14 +19,6 @@ function isStyledCell(v: CellValue | StyledCell): v is StyledCell {
 }
 
 const DAY_MS = 86400000;
-
-// Date -> Excel 1900-system serial (UTC). Serials 1..60 sit one day early because of Excel's
-// phantom 1900-02-29, mirroring excelToIsoDate on the read side.
-// Dates before 1900-01-01 have no serial in Excel; they come out as small/negative numbers.
-function dateToSerial(d: Date): number {
-  const serial = (d.getTime() - Date.UTC(1899, 11, 30)) / DAY_MS;
-  return serial >= 2 && serial < 61 ? serial - 1 : serial;
-}
 
 // "A1:C10" -> "$A$1:$C$10"
 const absoluteRef = (ref: string) => ref.replace(/([A-Za-z]+)(\d+)/g, '$$$1$$$2');

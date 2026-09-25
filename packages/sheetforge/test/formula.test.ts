@@ -10,6 +10,13 @@ describe('AST Formula Engine', () => {
     expect(engine.evaluate('2^3')).toBe(8);
   });
 
+  it('treats absolute references like relative ones and stays quiet on unsupported syntax', () => {
+    const engine = new FormulaEngine();
+    engine.loadData([[2, 3], [4, 5]]);
+    expect(engine.evaluate('$A$1*B$2+SUM($A1:B$1)')).toBe(15);
+    expect(engine.evaluate('Other!A1')).toBeNull();
+  });
+
   it('should evaluate boolean logic', () => {
     const engine = new FormulaEngine();
     expect(engine.evaluate('5>3')).toBe(true);
