@@ -1,40 +1,12 @@
-// Production-grade HMAC-SHA256 signing for license generation
-export async function generateLicenseSignature(orderId: string, hardwareHash: string): Promise<string> {
-  const data = `${orderId}:${hardwareHash}`;
-  const encoder = new TextEncoder();
-  const dataBuffer = encoder.encode(data);
-  
-  // Use a secure secret key from the environment, fallback to a default only for local dev sandbox
-  const secretString = process.env.LICENSE_SECRET_KEY || 'dev_sandbox_secret_key_change_in_prod';
-  const secretBuffer = encoder.encode(secretString);
+import { createPrivateKey, sign } from "crypto";
 
-  // Import the secret into Web Crypto API for HMAC
-  const key = await crypto.subtle.importKey(
-    'raw',
-    secretBuffer,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
+// Licence keys are `<payload>.<signature>` (base64url), signed with Ed25519.
+// @sheetforge/pro verifies them offline against the matching public key in its license.ts.
+export function createLicenseKey(orderId: string): string {
+  const privateKey = process.env.LICENSE_PRIVATE_KEY;
+  if (!privateKey) throw new Error("LICENSE_PRIVATE_KEY is missing on the server.");
+  const key = createPrivateKey({ key: Buffer.from(privateKey, "base64"), format: "der", type: "pkcs8" });
 
-  // Sign the data
-  const signatureBuffer = await crypto.subtle.sign('HMAC', key, dataBuffer);
-  
-  // Convert ArrayBuffer to Hex String
-  const signatureArray = Array.from(new Uint8Array(signatureBuffer));
-  const signatureHex = signatureArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  
-  return signatureHex;
-}
-
-export async function createLicenseJson(orderId: string, hardwareHash: string) {
-  const signature = await generateLicenseSignature(orderId, hardwareHash);
-  return {
-    orderId,
-    hardwareHash,
-    signature,
-    issuedAt: new Date().toISOString(),
-    tier: "PRO",
-    price: "$5 PPP"
-  };
+  const payload = Buffer.from(JSON.stringify({ orderId, tier: "pro", issuedAt: new Date().toISOString() })).toString("base64url");
+  return `${payload}.${sign(null, Buffer.from(payload), key).toString("base64url")}`;
 }

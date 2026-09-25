@@ -9,7 +9,6 @@ type CellValue = string | number | boolean | null;
 
 export default function Home() {
   const [orderId, setOrderId] = useState("");
-  const [hardwareHash, setHardwareHash] = useState("");
   const [license, setLicense] = useState<string | null>(null);
   const [licenseError, setLicenseError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -26,7 +25,7 @@ export default function Home() {
     setLicenseError(null);
     setIsGenerating(true);
     try {
-      const result = await validateOrderAndGenerateLicense(orderId, hardwareHash);
+      const result = await validateOrderAndGenerateLicense(orderId);
       if (result.success) {
         setLicense(result.license!);
       } else {
@@ -41,11 +40,11 @@ export default function Home() {
 
   const downloadLicense = () => {
     if (!license) return;
-    const blob = new Blob([license], { type: 'application/json' });
+    const blob = new Blob([license], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sheetforge-license.json';
+    a.download = 'sheetforge-license.txt';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -185,12 +184,6 @@ export default function Home() {
                 className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 placeholder:text-slate-600 transition-all"
                 placeholder="ord_123456789" />
             </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Hardware Fingerprint</label>
-              <input type="text" id="hardware-hash-input" value={hardwareHash} onChange={e => setHardwareHash(e.target.value)}
-                className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white font-mono text-xs focus:outline-none focus:ring-2 focus:ring-cyan-500 placeholder:text-slate-600 transition-all"
-                placeholder="64-char SHA-256 hash..." />
-            </div>
 
             {licenseError && (
               <div className="text-red-400 text-xs bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
@@ -198,21 +191,21 @@ export default function Home() {
               </div>
             )}
 
-            <button id="generate-license-btn" onClick={handleGenerateLicense} disabled={isGenerating || !orderId || !hardwareHash}
+            <button id="generate-license-btn" onClick={handleGenerateLicense} disabled={isGenerating || !orderId}
               className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-cyan-500/20 transition-all transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2">
-              {isGenerating ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Validating...</> : '→ Generate License File'}
+              {isGenerating ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Validating...</> : '→ Generate License Key'}
             </button>
 
             {license && (
               <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-emerald-400 flex items-center gap-1.5">✓ License validated</span>
-                  <button onClick={downloadLicense} className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-300 transition-colors font-medium">↓ Download JSON</button>
+                  <button onClick={downloadLicense} className="text-xs bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-slate-300 transition-colors font-medium">↓ Download</button>
                 </div>
-                <pre className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs text-emerald-400 font-mono overflow-x-auto max-h-48 scrollbar-thin">
+                <pre className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs text-emerald-400 font-mono whitespace-pre-wrap break-all max-h-48 scrollbar-thin">
                   {license}
                 </pre>
-                <p className="text-xs text-slate-600">Drop <code className="text-slate-400">sheetforge-license.json</code> into your project root.</p>
+                <p className="text-xs text-slate-600">Activate with <code className="text-slate-400">await setLicenseKey(process.env.SHEETFORGE_LICENSE)</code> from <code className="text-slate-400">@sheetforge/pro</code>.</p>
               </div>
             )}
           </div>
