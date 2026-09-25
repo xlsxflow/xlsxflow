@@ -4,3 +4,10 @@ dist/
 *.log
 .env.local
 .DS_Store
+
+# Generated benchmark / scratch outputs
+bench-*.xlsx
+benchmark-*.xlsx
+test-xml.xlsx
+packages/sheetforge/scripts/worker.js
+packages/sheetforge/README.md

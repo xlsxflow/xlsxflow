@@ -55,6 +55,36 @@ describe('XML SAX-like Stream Parser', () => {
     expect(tokens).toContainEqual({ type: 'endElement', name: 'c' });
     expect(tokens).toContainEqual({ type: 'endElement', name: 'worksheet' });
   });
+
+  it('should ignore > inside attributes and unescape XML entities including emojis', async () => {
+    const xml = `<worksheet><dataValidation formula1="A1&gt;B1" formula2='A1>B1'><t xml:space="preserve"> Me &amp; You &#x1F600; </t></dataValidation></worksheet>`;
+    
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(xml));
+        controller.close();
+      }
+    });
+
+    const tokenStream = stream.pipeThrough(createXmlStreamParser());
+    const reader = tokenStream.getReader();
+    
+    const tokens = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      tokens.push(value);
+    }
+
+    expect(tokens).toContainEqual({ 
+      type: 'startElement', 
+      name: 'dataValidation', 
+      attributes: { formula1: 'A1>B1', formula2: 'A1>B1' } 
+    });
+    expect(tokens).toContainEqual({ type: 'startElement', name: 't', attributes: { 'space': 'preserve' } });
+    expect(tokens).toContainEqual({ type: 'text', value: ' Me & You 😀 ' });
+    expect(tokens).toContainEqual({ type: 'endElement', name: 't' });
+  });
 });
 
 describe('Worksheet Row Assembler', () => {
@@ -92,6 +122,6 @@ describe('Worksheet Row Assembler', () => {
     }
 
     expect(rows.length).toBe(1);
-    expect(rows[0]).toEqual(['Hello World', 123.45, true]);
+    expect(rows[0].cells).toEqual(['Hello World', 123.45, true]);
   });
 });

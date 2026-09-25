@@ -1,0 +1,54 @@
+export interface RandomAccessReader {
+  size: number;
+  read(offset: number, length: number): Promise<Uint8Array>;
+  stream(offset: number, length: number): ReadableStream<Uint8Array>;
+  close(): Promise<void>;
+}
+
+// Built-in adapter for Web Blob/File
+export function createBlobReader(blob: Blob): RandomAccessReader {
+  return {
+    size: blob.size,
+    async read(offset: number, length: number): Promise<Uint8Array> {
+      const slice = blob.slice(offset, offset + length);
+      return new Uint8Array(await slice.arrayBuffer());
+    },
+    stream(offset: number, length: number): ReadableStream<Uint8Array> {
+      const slice = blob.slice(offset, offset + length);
+      return slice.stream();
+    },
+    async close() {}
+  };
+}
+
+// Built-in adapter for Node.js fs.promises
+// Dynamic, bundler-ignored imports so browser bundles don't try to resolve Node built-ins
+export async function createFileReader(filePath: string): Promise<RandomAccessReader> {
+  const fs = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'fs/promises');
+  const { createReadStream } = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'fs');
+  const { Readable } = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ 'stream');
+  const stat = await fs.stat(filePath);
+  const fd = await fs.open(filePath, 'r');
+
+  return {
+    size: stat.size,
+    async read(offset: number, length: number): Promise<Uint8Array> {
+      const buffer = new Uint8Array(length);
+      let filled = 0;
+      while (filled < length) {
+        const { bytesRead } = await fd.read(buffer, filled, length - filled, offset + filled);
+        if (bytesRead === 0) throw new Error(`Unexpected end of file reading ${filePath} at ${offset + filled}`);
+        filled += bytesRead;
+      }
+      return buffer;
+    },
+    stream(offset: number, length: number): ReadableStream<Uint8Array> {
+      if (length === 0) return new ReadableStream({ start(c) { c.close(); } });
+      // Opens its own handle, so streams outlive close(). toWeb keeps backpressure.
+      return Readable.toWeb(createReadStream(filePath, { start: offset, end: offset + length - 1 })) as ReadableStream<Uint8Array>;
+    },
+    async close() {
+      await fd.close();
+    }
+  };
+}

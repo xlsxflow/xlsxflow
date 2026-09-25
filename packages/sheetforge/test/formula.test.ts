@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FormulaEngine } from '../src/pro/formula-engine';
+import { FormulaEngine } from '../src/core/formula-engine';
 
 describe('AST Formula Engine', () => {
   it('should evaluate basic arithmetic', () => {

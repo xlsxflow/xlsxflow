@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { SheetWriter } from '../src/core/writer';
-import { Row } from '../src/pro/types';
-import { createZipStreamParser } from '../src/core/zip-stream';
+import { Row } from '../src/core/types';
+import { ZipRandomAccessParser } from '../src/core/zip-random-access';
+import { createBlobReader } from '../src/core/random-access';
 
 // Helper to consume stream into Uint8Array
 async function streamToUint8Array(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
@@ -97,23 +98,16 @@ describe('SheetWriter', () => {
     // Verify via Reader
     const { SheetReader } = await import('../src/core/index');
     const reader = new SheetReader();
-    // @ts-ignore
-    const oldParse = reader.parseStyles;
-    // @ts-ignore
-    reader.parseStyles = async function(xmlTokenStream, map) {
-      await oldParse.call(this, xmlTokenStream, map);
-      console.log('STYLES MAP:', map);
-    };
-    
-    const streamReader = new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
+    const blob = new Blob([bytes.buffer as ArrayBuffer]);
+    const fileReader = createBlobReader(blob);
     
     let parsedRows: any[] = [];
-    for await (const row of await reader.parse(streamReader)) {
+    for await (const row of await reader.parse(fileReader)) {
       parsedRows.push(row);
     }
     
     // 45000 in Excel is 2023-03-15T00:00:00.000Z
-    expect(parsedRows[0][0]).toBe('2023-03-15T00:00:00.000Z');
+    expect(parsedRows[0].cells[0]).toBe('2023-03-15T00:00:00.000Z');
   });
   it('should support freezePanes and mergeCells', async () => {
     const writer = new SheetWriter();
@@ -126,13 +120,17 @@ describe('SheetWriter', () => {
 
     const { SheetReader } = await import('../src/core/index');
     const reader = new SheetReader();
-    const streamReader = new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
+    const blob = new Blob([bytes.buffer as ArrayBuffer]);
+    const fileReader = createBlobReader(blob);
     
-    const result = await reader.parse(streamReader);
+    const result = await reader.parse(fileReader);
     for await (const row of result) { } // consume stream
     
     const meta = await result.getMetadata();
     expect(meta.mergedCells).toEqual(['A1:B1']);
+    expect(meta.freezePanes).toBeDefined();
+    expect(meta.freezePanes?.row).toBe(1);
+    expect(meta.freezePanes?.col).toBe(1);
   });
 
   it('should generate dataValidations correctly', async () => {
@@ -146,26 +144,18 @@ describe('SheetWriter', () => {
     const bytes = await streamToUint8Array(stream);
     
     // Extract sheet1.xml from the zip to verify its content
-    const streamReader = new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } });
-    const zipStream = streamReader.pipeThrough(createZipStreamParser());
-    const zipReader = zipStream.getReader();
-    let sheetXml = '';
+    const blob = new Blob([bytes.buffer as ArrayBuffer]);
+    const fileReader = createBlobReader(blob);
+    const zip = new ZipRandomAccessParser(fileReader);
+    await zip.parseCentralDirectory();
     
+    const sheetStream = await zip.extractStream('xl/worksheets/sheet1.xml');
+    const textReader = sheetStream.pipeThrough(new TextDecoderStream() as any).getReader();
+    let sheetXml = '';
     while (true) {
-      const { done, value } = await zipReader.read();
-      if (done) break;
-      if (value.filename === 'xl/worksheets/sheet1.xml') {
-        let s = value.stream;
-        if (value.compressionMethod === 8) s = s.pipeThrough(new DecompressionStream('deflate-raw') as any);
-        const textReader = s.pipeThrough(new TextDecoderStream() as any).getReader();
-        while (true) {
-          const res = await textReader.read();
-          if (res.done) break;
-          sheetXml += res.value;
-        }
-      } else {
-        await value.stream.pipeTo(new WritableStream());
-      }
+      const res = await textReader.read();
+      if (res.done) break;
+      sheetXml += res.value;
     }
     
     expect(sheetXml).toContain('<dataValidations count="1">');

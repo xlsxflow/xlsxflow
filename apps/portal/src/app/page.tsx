@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import { validateOrderAndGenerateLicense } from "./actions";
-import { SheetReader, SheetWriter } from "@sheetforge/core";
+import { SheetReader, SheetWriter, createBlobReader } from "@sheetforge/core";
 import type { Row } from "@sheetforge/core";
 
 type CellValue = string | number | boolean | null;
@@ -57,13 +57,12 @@ export default function Home() {
     setHeaders([]);
 
     try {
-      const stream = file.stream() as ReadableStream<Uint8Array>;
       const reader = new SheetReader();
-      const generator = await reader.parse(stream);
+      const result = await reader.parse(createBlobReader(file));
 
       const parsed: CellValue[][] = [];
-      for await (const row of generator) {
-        parsed.push(row as CellValue[]);
+      for await (const row of result) {
+        parsed.push(row.cells);
         // Stream render: update every 500 rows for live feel
         if (parsed.length % 500 === 0) {
           setRows([...parsed]);
@@ -119,11 +118,11 @@ export default function Home() {
     writer.addSheet('Metadata', [
       ['Property', 'Value'],
       ['Generated On', { value: todayExcel, style: { numFmt: 'yyyy-mm-dd hh:mm:ss' } }],
-      ['Generator', 'SheetForge v0.3.0-beta']
+      ['Generator', 'SheetForge v1.0.0']
     ], { columnWidths: [20, 30] });
 
-    const bytes = await writer.write();
-    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const bytes = await new Response(writer.write()).arrayBuffer();
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

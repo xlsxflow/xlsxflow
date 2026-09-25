@@ -11,7 +11,7 @@
     <a href="#features">Features</a> •
     <a href="#installation">Installation</a> •
     <a href="#quick-start">Quick Start</a> •
-    <a href="#pro-tier">Pro Tier</a> •
+    <a href="#styles-formulas--conditional-formats">Styles &amp; Formulas</a> •
     <a href="#benchmarks">Benchmarks</a>
   </p>
 </div>
@@ -28,7 +28,7 @@ Unlike DOM-based AST parsers (like ExcelJS or SheetJS), SheetForge processes fil
 - **True Streaming**: Parse gigabytes of Excel data using `ReadableStream` with almost zero memory overhead.
 - **Edge Native**: Fully compatible with Node.js, Deno, Bun, Cloudflare Workers, and modern browsers.
 - **Read & Write**: Stream massive `.xlsx` files and generate them on the fly.
-- **Styles & Formulas (Pro)**: Fully supported conditional formatting, typography, fills, and formula evaluation via the Dead-Drop encryption architecture.
+- **Styles & Formulas**: Fonts, fills, borders, alignment, number formats, data bars / color scales, cached formula results, dates, hyperlinks and autofilters. Read formulas and styles back. All MIT, all free.
 
 ## 📦 Installation
 
@@ -48,18 +48,39 @@ yarn add @sheetforge/core
 ### Parsing an Excel File (Streaming)
 
 ```typescript
-import { SheetReader } from '@sheetforge/core';
+import { SheetReader, createBlobReader } from '@sheetforge/core';
+
+// Browser / Edge: any Blob or File (e.g. from <input type="file">)
+const blob = await fetch('https://example.com/massive-data.xlsx').then(r => r.blob());
 
 const reader = new SheetReader();
-const stream = await fetch('https://example.com/massive-data.xlsx').then(r => r.body!);
-
-// Parse the first sheet encountered (or specify sheetName in options)
-const rows = await reader.parse(stream, { sheetName: 'Sheet1' });
+// Omit sheetName to read the first tab
+const rows = await reader.parse(createBlobReader(blob), { sheetName: 'Sheet1' });
 
 for await (const row of rows) {
-  console.log(row); // ['ID', 'Name', 'Amount']
-  
-  // Memory stays flat no matter how large the file is!
+  console.log(row.rowNumber, row.cells); // 1 ['ID', 'Name', 'Amount']
+}
+
+const meta = await rows.getMetadata(); // merged cells, hidden rows/cols, freeze panes
+```
+
+Dates come back as ISO-8601 strings. Opt in to more detail, each indexed like `row.cells`:
+
+- `{ formulas: true }` gives `row.formulas`, with shared formulas expanded per cell.
+- `{ styles: true }` gives `row.styles`, as `CellStyle` objects (the same shape the writer takes). Theme and palette colours are resolved to ARGB.
+- `{ richText: true }` gives `row.richText`, the formatted runs of cells that have them. `row.cells` still holds the plain text.
+
+Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format.
+
+Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB uncompressed each, to stop zip bombs. The streamed worksheet is uncapped. Change both with `maxUncompressedBytes` (`Infinity` disables).
+
+In Node.js, read straight from disk:
+
+```typescript
+import { SheetForge } from '@sheetforge/core';
+
+for await (const row of await SheetForge.readFile('./data.xlsx')) {
+  console.log(row.cells);
 }
 ```
 
@@ -70,98 +91,108 @@ import { SheetWriter } from '@sheetforge/core';
 
 const writer = new SheetWriter();
 
-writer.addRow(['Header 1', 'Header 2', 'Header 3']);
-writer.addRow([1, 2, 3]);
-writer.addRow(['Data', 'More Data', 'Even More Data']);
+writer.addSheet('Report', [
+  ['Header 1', 'Header 2', 'Header 3'],
+  [1, 2, 3],
+  ['Data', 'More Data', 'Even More Data'],
+]);
 
-const blob = await writer.generateBlob();
-// Download or save the .xlsx Blob!
+// write() returns a ReadableStream<Uint8Array> of the .xlsx file
+const blob = await new Response(writer.write()).blob();
 ```
 
-## 💎 Pro Tier
+Rows can also be an `AsyncIterable<Row>`, so millions of rows can be generated lazily; the writer only pulls rows as fast as the output is consumed.
 
-SheetForge Core is entirely open-source (MIT). For advanced styling and formula evaluation, we offer a **Pro Tier** for just **$5 PPP**. 
+### Appending to an Existing File
 
-The Pro Tier includes:
-- **`StyleEngine`**: Cell typography (fonts, bold, italic), cell fills (solid, gradients), borders, and alignments.
-- **`FormulaEngine`**: Evaluate math, logic, and lookup functions on the fly.
-- **`ConditionalFormatter`**: Apply data bars, color scales, and icon sets.
+```typescript
+import { SheetEditor, createBlobReader } from '@sheetforge/core';
 
-### Activating Pro
+const editor = new SheetEditor();
+editor.appendSheet('Sheet1', [['new', 'row']]); // appended after the last existing row
+const edited = editor.edit(createBlobReader(existingBlob)); // ReadableStream<Uint8Array>
+```
 
-No databases, no SaaS subscriptions, and no external network calls required. Simply purchase a one-time license key and pass it into the `ProEngine` to unlock advanced features instantly.
+## Styles, Formulas & Conditional Formats
 
 ```typescript
 import { SheetWriter } from '@sheetforge/core';
-import { ProEngine } from '@sheetforge/core/pro';
 
-// 1. Initialize Pro Engine with your 5$ PPP license payload
-const pro = new ProEngine(process.env.SHEETFORGE_LICENSE);
-
-// 2. Pass it to the writer
-const writer = new SheetWriter({ proEngine: pro });
-
-// 3. Use Pro styling!
-writer.addRow([
-  pro.styleEngine.apply({ value: 'Total Revenue', font: { bold: true } }),
-  pro.formulaEngine.create('SUM(B2:B100)')
-]);
+const writer = new SheetWriter();
+writer.addSheet('Sales', [
+  [{ value: 'Total Revenue', style: { font: { bold: true }, fill: { type: 'solid', fgColor: 'FF1E3A5F' } } }],
+  [100], [250],
+  [{ value: null, formula: '=SUM(A2:A3)' }],          // cached result computed on write
+  [new Date(), { value: new Date(), style: { numFmt: 'dd/mm/yyyy' } }], // UTC; default format yyyy-mm-dd[ hh:mm:ss]
+  [{ value: 'Docs', hyperlink: 'https://example.com' }, { value: 'Back to top', hyperlink: '#Sales!A1' }],
+  [{ value: null, richText: [{ text: 'Net ', font: { bold: true } }, { text: 'revenue', font: { color: 'FFC00000' } }] }],
+], {
+  freezePanes: { row: 1 },
+  autoFilter: 'A1:B1',
+  conditionalFormats: [{ range: 'A2:A3', rule: { type: 'dataBar', color: 'FF06B6D4' } }],
+});
 ```
+
+Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when values repeat, but the distinct strings stay in memory until the file is finished.
 
 ## 📊 Benchmarks
 
-Because SheetForge parses chunks continuously rather than building an Abstract Syntax Tree (AST) in memory, its memory footprint remains effectively flat regardless of file size.
+Write benchmark: 100,000 rows × 10 numeric columns (1M cells). Each library ran in its own process on Node v25.8.2, and "Heap" is the growth in heap usage. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/sheetforge`, after `pnpm build`).
 
-Benchmarks were run on a standard development machine under **Node v25.8.2** using `--expose-gc` to measure clean heap deltas.
-
-### 1M Numbers (10 cols × 100k rows)
-
-```mermaid
-gantt
-    title Write Time — 1M Numbers
-    dateFormat  X
-    axisFormat %s ms
-
-    section SheetForge v1.0
-    31937 ms  :done, 0, 31937
-    
-    section SheetJS (est.)
-    65000 ms  :active, 0, 65000
-    
-    section ExcelJS (est.)
-    120000 ms :crit, 0, 120000
-```
-
-| Metric | SheetForge v1.0 | SheetJS (est.) | ExcelJS (est.) |
+| Library | Write Time | File Size | Heap |
 |---|---|---|---|
-| **Write Time** | **31,937 ms** | ~65,000 ms | ~120,000 ms |
-| **File Size** | **2.9 MB** | ~3.1 MB | ~3.0 MB |
-| **Read Time** | **6,814 ms** | ~11,000 ms | ~26,000 ms |
-| **Peak Heap** | **+55.06 MB** | ~180 MB | ~450 MB |
+| **SheetForge** | **1,641 ms** | **2.9 MB** | **+1 MB** |
+| SheetJS (`xlsx`) | 3,610 ms | 31.4 MB | +170 MB |
+| xlsx-populate | 7,039 ms | 2.9 MB | +114 MB |
+| ExcelJS (streaming writer) | 13,458 ms | 3.0 MB | +9 MB |
+| excel4node | 15,383 ms | 3.1 MB | +205 MB |
+| write-excel-file | out of memory at 100k rows | | |
+| msexcel-builder | out of memory at 100k rows | | |
 
-### 1M Duplicate Strings (best case for SST deduplication)
+Rows are pulled from an async generator. The writer only generates rows as fast as the output stream is consumed, so memory stays flat as row count grows.
 
-| Metric | SheetForge v1.0 |
-|---|---|
-| **Write Time** | **25,557 ms** |
-| **File Size** | **2.9 MB** (SST dedup compresses well) |
-| **Read Time** | **6,672 ms** |
-| **Peak Heap** | **+54.09 MB** |
+Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers, dates, booleans; 6.4 MB). Every library reads every cell. "Peak RSS" is the peak memory of the reading process. Reproduce with `npx tsx scripts/benchmark-read-competitors.ts`.
 
-### 1M Unique Strings (worst case — large SST)
-
-| Metric | SheetForge v1.0 |
-|---|---|
-| **Write Time** | **34,326 ms** |
-| **File Size** | **8.3 MB** |
-| **Read Time** | **7,942 ms** |
-| **Peak Heap** | **+52.72 MB** |
-
-*\* Memory footprint remains completely flat (O(1)) for numerical data and unique/repetitive strings because the streaming pipeline generates, pipes, and writes data chunks continuously directly into the ZIP writer!*
+| Library | Read Time | Peak RSS |
+|---|---|---|
+| **SheetForge** | **2,446 ms** | **92 MB** |
+| ExcelJS (streaming reader) | 3,235 ms | 265 MB |
+| ExcelJS | 4,637 ms | 661 MB |
+| SheetJS (`xlsx`) | 6,434 ms | 551 MB |
 
 ---
 
 ## 📋 Changelog
+
+### Unreleased
+
+- **Fixed: reader dropped/corrupted cells at stream chunk boundaries** (the XML tokenizer discarded buffered characters between chunks). Large files from ExcelJS/SheetJS now read back exactly.
+- **Fixed: styles pointed at the wrong font/fill/border** (off-by-one against the default entries), and styles used by `AsyncIterable` rows were missing from `styles.xml`.
+- **Real backpressure** in the ZIP writer and worksheet stream; producer errors now error the output stream instead of hanging it.
+- **Faster writes** via table-driven CRC-32 (1M numeric cells: ~1.6 s, previously ~32 s).
+- Reader resolves sheets from `workbook.xml` (first tab by default, absolute targets, any attribute order).
+- `SheetEditor`: handles empty `<sheetData/>`, copies untouched entries without recompressing, errors on unknown sheet names; now exported.
+- Formula cached values keep their type; aggregates ignore text/blanks like Excel; formulas evaluate against their own sheet.
+- Styles, formulas and conditional formatting are part of the MIT core (moved out of `src/pro`). Licensing code moved to a separate, unpublished `@sheetforge/pro` package.
+- npm package now ships compiled ESM + CJS builds with bundled type declarations instead of TypeScript source.
+- Browser bundles no longer try to resolve Node `fs`.
+- **Fixed: numbers shown as dates.** Number formats with quoted text, escapes or colours (`#,##0.00 "USD"`, `0 "days"`, `[Red]0.0`) were detected as date formats, so their values were returned as dates.
+- **Fixed: unhandled promise rejection** (fatal in Node) when reading a corrupt file without calling `getMetadata()`. Corrupt ZIP entries now fail with an error that names the entry.
+- **Hostile-input hardening:** the XML tokenizer is linear-time on giant tags, text nodes and CDATA sections (was quadratic). Cell references beyond column XFD and oversized hidden-column ranges are rejected or clamped instead of allocating without bound.
+- **~2.5x faster reads:** the tokenizer emits one batch of tokens per chunk instead of one stream chunk per token.
+- Reader correctness:
+  - Workbook, sheets, shared strings and styles are located via package relationships, so Strict OOXML and non-standard part names work.
+  - `_xHHHH_` escapes are decoded and XML line endings are normalized.
+  - Empty `<v/>` reads as empty, and `-0` as `0`.
+  - Out-of-order cells land in the right column.
+  - Time-only values are no longer a day off, and datetimes keep millisecond precision.
+- **New:** `Date` cell values, hyperlinks (URLs and in-workbook locations), `autoFilter`, and an opt-in shared string table on write. Reading can return formulas (`formulas: true`, shared formulas expanded) and styles (`styles: true`).
+- **New:** rich text runs on write (`richText`) and read (`richText: true`); hyperlinks read back via `getMetadata()`; theme and indexed colours (with tints, and the workbook's own palette) resolved to ARGB when reading styles.
+- **New:** 1 GiB default size cap on in-memory parts when reading (zip-bomb guard).
+- **Fixed: files Excel would repair:** gradient fills were written as `<gradientStop>` (the element is `<stop>`), `vertical: 'middle'` was written verbatim (OOXML says `center`), and conditional formatting came after data validation (schema order is the other way round).
+- Fixed: `minValue`/`maxValue` on data bars were ignored; every conditional format had priority 1; colours and ranges were not XML-escaped.
+- Fixed: strings containing `_xHHHH_`, control characters or CR, or leading/trailing spaces, now survive a write/read round trip. `NaN`/`Infinity` are written as `#NUM!` instead of an invalid cell.
+- Test corpus: fixtures from openpyxl, ExcelJS, SheetJS, xlsx-populate, SheetForge, plus hand-crafted edge cases, checked against an openpyxl oracle. Also a fuzz suite for corrupted ZIPs and hostile XML.
 
 ### v1.0.0 (Official Release)
 > True O(1) Streaming Architecture for Writers & Editors
@@ -224,7 +255,7 @@ gantt
 
 ## 📄 License
 
-The Core engine is licensed under the MIT License. Pro features are governed by a separate commercial license. 
+`@sheetforge/core` is licensed under the [MIT License](packages/sheetforge/LICENSE). A commercial `@sheetforge/pro` add-on is planned; it will be a separate package under its own license and never changes the terms of the core.
 
 ---
 <div align="center">

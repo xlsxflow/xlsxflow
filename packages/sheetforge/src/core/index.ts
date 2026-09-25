@@ -1,124 +1,120 @@
-import { createZipStreamParser, ZipEntry, createByteLimitStream } from './zip-stream';
-import { createXmlStreamParser, XmlToken } from './xml-stream';
-import { parseWorksheet, ParseResult } from './worksheet-parser';
+import { RandomAccessReader } from './random-access';
+import { ZipRandomAccessParser } from './zip-random-access';
+import { createXmlBatchParser, XmlToken } from './xml-stream';
+import { parseWorksheet, ParseResult, RichTextCollector } from './worksheet-parser';
+import { resolveWorkbookParts, hyperlinkTargets, decodeXString, isDateFormatCode } from './utils';
+import { parseThemeColors, colorResolver, applyFontElement, ColorResolver } from './style-reader';
+import type { CellStyle, CellFont, CellFill, GradientFill, CellBorder, BorderSide, CellAlignment, RichTextRun } from './types';
+export { SheetWriter } from './writer';
+export { createFileReader, createBlobReader, type RandomAccessReader } from './random-access';
+export { sheetToJson, streamToCsv, resolveSheetPaths } from './utils';
+export { SheetEditor } from './editor';
 
 export interface ParseOptions {
   sheetName?: string;
-  maxUncompressedBytes?: number; // Zip bomb protection limit
+  // Zip bomb protection: max uncompressed bytes per part. Parts held in memory (workbook, rels,
+  // shared strings, styles) default to 1 GiB; the streamed worksheet is only limited when set.
+  // Pass Infinity to disable.
+  maxUncompressedBytes?: number;
+  formulas?: boolean; // report cell formulas in RowData.formulas
+  styles?: boolean;   // report cell styles in RowData.styles
+  richText?: boolean; // report formatted text runs in RowData.richText
+}
+
+// Number formats Excel does not write into styles.xml (ECMA-376 Part 1, 18.8.30)
+const BUILTIN_NUM_FMTS: [number, string][] = [
+  [1, '0'], [2, '0.00'], [3, '#,##0'], [4, '#,##0.00'], [9, '0%'], [10, '0.00%'], [11, '0.00E+00'],
+  [12, '# ?/?'], [13, '# ??/??'], [14, 'mm-dd-yy'], [15, 'd-mmm-yy'], [16, 'd-mmm'], [17, 'mmm-yy'],
+  [18, 'h:mm AM/PM'], [19, 'h:mm:ss AM/PM'], [20, 'h:mm'], [21, 'h:mm:ss'], [22, 'm/d/yy h:mm'],
+  [37, '#,##0 ;(#,##0)'], [38, '#,##0 ;[Red](#,##0)'], [39, '#,##0.00;(#,##0.00)'], [40, '#,##0.00;[Red](#,##0.00)'],
+  [45, 'mm:ss'], [46, '[h]:mm:ss'], [47, 'mmss.0'], [48, '##0.0E+0'], [49, '@'],
+];
+
+const DEFAULT_MAX_PART_BYTES = 1 << 30;
+
+function createByteLimitStream(maxBytes: number): TransformStream<Uint8Array, Uint8Array> {
+  let bytesRead = 0;
+  return new TransformStream({
+    transform(chunk, controller) {
+      bytesRead += chunk.length;
+      if (bytesRead > maxBytes) {
+        controller.error(new Error(`Security Error: Stream exceeded maximum uncompressed size of ${maxBytes} bytes.`));
+      } else {
+        controller.enqueue(chunk);
+      }
+    }
+  });
 }
 
 export class SheetReader {
-  async parse(stream: ReadableStream<Uint8Array>, options?: ParseOptions): Promise<ParseResult> {
-    const zipStream = stream.pipeThrough(createZipStreamParser());
-    const zipReader = zipStream.getReader();
+  async parse(reader: RandomAccessReader, options?: ParseOptions): Promise<ParseResult> {
+    const zip = new ZipRandomAccessParser(reader);
+    await zip.parseCentralDirectory();
 
-    let sharedStrings = new Map<number, string>();
-    let styles = new Map<number, number>();
-    let workbookXml = '';
-    let workbookRelsXml = '';
-    let targetSheetPath: string | null = null;
-    let worksheetStream: ReadableStream<Uint8Array> | null = null;
+    const sharedStrings = new Map<number, string>();
+    const styles = new Map<number, number>();
+    const limit = (st: ReadableStream<Uint8Array>, max = options?.maxUncompressedBytes ?? DEFAULT_MAX_PART_BYTES) =>
+      max !== Infinity ? st.pipeThrough(createByteLimitStream(max)) : st;
+    const readText = async (name: string) =>
+      zip.has(name) ? this.readStreamToString(limit(await zip.extractStream(name))) : '';
 
-    // We must pump the ZIP stream concurrently in the background to prevent backpressure deadlock.
-    // This promise resolves as soon as we find the target worksheet stream.
-    const findWorksheetPromise = new Promise<ReadableStream<Uint8Array>>((resolve, reject) => {
-      (async () => {
-        try {
-          while (true) {
-            const { done, value } = await zipReader.read();
-            if (done) {
-              if (!worksheetStream) reject(new Error("Target worksheet not found in stream."));
-              break;
-            }
-            
-            const entry = value as ZipEntry;
-            
-            if (entry.filename === 'xl/workbook.xml') {
-              workbookXml = await this.readStreamToString(entry);
-              this.tryResolveSheetPath(workbookXml, workbookRelsXml, options, (path) => { targetSheetPath = path; });
-            } else if (entry.filename === 'xl/_rels/workbook.xml.rels') {
-              workbookRelsXml = await this.readStreamToString(entry);
-              this.tryResolveSheetPath(workbookXml, workbookRelsXml, options, (path) => { targetSheetPath = path; });
-            } else if (entry.filename === 'xl/sharedStrings.xml') {
-              let s = entry.stream;
-              if (entry.compressionMethod === 8) s = s.pipeThrough(new DecompressionStream('deflate-raw') as any);
-              const xmlStream = s.pipeThrough(createXmlStreamParser());
-              await this.parseSharedStrings(xmlStream, sharedStrings);
-            } else if (entry.filename === 'xl/styles.xml') {
-              let s = entry.stream;
-              if (entry.compressionMethod === 8) s = s.pipeThrough(new DecompressionStream('deflate-raw') as any);
-              const xmlStream = s.pipeThrough(createXmlStreamParser());
-              await this.parseStyles(xmlStream, styles);
-            } else if (entry.filename.startsWith('xl/worksheets/')) {
-              if (options?.sheetName && !targetSheetPath) {
-                reject(new Error(`Cannot stream worksheet: workbook.xml must precede worksheets in the ZIP to resolve by name.`));
-                await entry.stream.pipeTo(new WritableStream());
-                continue;
-              }
+    // 1. Locate workbook, sheets, shared strings and styles via package relationships
+    const parts = await resolveWorkbookParts(readText);
+    let worksheetZipPath: string | undefined;
+    if (options?.sheetName) {
+      worksheetZipPath = parts.sheets.get(options.sheetName);
+      if (!worksheetZipPath) throw new Error(`Sheet with name "${options.sheetName}" not found in workbook.`);
+    } else {
+      worksheetZipPath = parts.sheets.values().next().value
+        ?? zip.getFiles().find(f => /^xl\/worksheets\/[^/]+\.xml$/.test(f));
+      if (!worksheetZipPath) throw new Error("No worksheets found in ZIP.");
+    }
+    const is1904 = /<(?:\w+:)?workbookPr\b[^>]*\bdate1904="(?:1|true)"/.test(parts.workbookXml);
 
-              const isTarget = targetSheetPath ? `xl/${targetSheetPath}` === entry.filename : true;
-              
-              if (isTarget && !worksheetStream) {
-                worksheetStream = entry.stream;
-                if (entry.compressionMethod === 8) {
-                  worksheetStream = worksheetStream.pipeThrough(new DecompressionStream('deflate-raw') as any);
-                }
-                if (options?.maxUncompressedBytes) {
-                  worksheetStream = worksheetStream.pipeThrough(createByteLimitStream(options.maxUncompressedBytes));
-                }
-                // Resolve the promise so the caller gets the stream immediately!
-                resolve(worksheetStream);
-                // DO NOT BREAK! We must keep reading the rest of the ZIP stream and dumping it
-                // into WritableStreams so that `zipReader` doesn't block due to backpressure.
-              } else {
-                await entry.stream.pipeTo(new WritableStream());
-              }
-            } else {
-              // Discard irrelevant files
-              await entry.stream.pipeTo(new WritableStream());
-            }
-          }
-        } catch (e) {
-          reject(e);
-        } finally {
-          zipReader.releaseLock();
-        }
-      })();
-    });
-
-    const streamFound = await findWorksheetPromise;
-    const xmlStream = streamFound.pipeThrough(createXmlStreamParser());
-    return parseWorksheet(xmlStream, sharedStrings, styles);
-  }
-
-  private tryResolveSheetPath(workbookXml: string, relsXml: string, options: ParseOptions | undefined, setPath: (p: string) => void) {
-    if (!options?.sheetName || !workbookXml || !relsXml) return;
-    
-    // 1. Find sheet r:id by name
-    const sheetRegex = new RegExp(`<sheet[^>]*name="([^"]+)"[^>]*r:id="([^"]+)"`, 'g');
-    let match;
-    let rId: string | null = null;
-    while ((match = sheetRegex.exec(workbookXml)) !== null) {
-      if (match[1] === options.sheetName) {
-        rId = match[2];
-        break;
-      }
+    // 2. Parse Styles (if exists). Colours can refer to the theme, only read when they are reported.
+    const theme = (options?.styles || options?.richText) && parts.theme ? parseThemeColors(await readText(parts.theme)) : [];
+    const stylesPath = parts.styles ?? 'xl/styles.xml';
+    let cellStyles: (CellStyle | undefined)[] = [];
+    let color = colorResolver(theme);
+    if (zip.has(stylesPath)) {
+      const xmlStream = limit(await zip.extractStream(stylesPath)).pipeThrough(createXmlBatchParser());
+      ({ cellStyles, color } = await this.parseStyles(xmlStream, styles, theme));
     }
 
-    if (!rId) throw new Error(`Sheet with name "${options.sheetName}" not found in workbook.`);
+    // 3. Parse Shared Strings (if exists)
+    const sstPath = parts.sharedStrings ?? 'xl/sharedStrings.xml';
+    const sharedRichText = options?.richText ? new Map<number, RichTextRun[]>() : undefined;
+    if (zip.has(sstPath)) {
+      const xmlStream = limit(await zip.extractStream(sstPath)).pipeThrough(createXmlBatchParser());
+      await this.parseSharedStrings(xmlStream, sharedStrings, sharedRichText && { map: sharedRichText, color });
+    }
 
-    // 2. Find Target path by r:id
-    const relRegex = new RegExp(`<Relationship[^>]*Id="${rId}"[^>]*Target="([^"]+)"`, 'g');
-    const relMatch = relRegex.exec(relsXml);
-    if (!relMatch) throw new Error(`Relationship for sheet "${options.sheetName}" not found.`);
-
-    setPath(relMatch[1]);
+    // 4. Parse Worksheet
+    if (!zip.has(worksheetZipPath)) {
+      throw new Error(`Worksheet ${worksheetZipPath} not found in ZIP.`);
+    }
+    // Rows are yielded as they stream, so an unlimited worksheet costs time, not memory
+    const xmlStream = limit(await zip.extractStream(worksheetZipPath), options?.maxUncompressedBytes ?? Infinity)
+      .pipeThrough(createXmlBatchParser());
+    return parseWorksheet(xmlStream, sharedStrings, styles, is1904, {
+      formulas: options?.formulas,
+      cellStyles: options?.styles ? cellStyles : undefined,
+      richText: options?.richText ? color : undefined,
+      sharedRichText,
+      hyperlinkTargets: await hyperlinkTargets(readText, worksheetZipPath),
+    });
   }
 
-  private async parseSharedStrings(xmlTokenStream: ReadableStream<XmlToken>, map: Map<number, string>) {
+  private async parseSharedStrings(
+    xmlTokenStream: ReadableStream<XmlToken | XmlToken[]>,
+    map: Map<number, string>,
+    rich?: { map: Map<number, RichTextRun[]>; color: ColorResolver }
+  ) {
     const reader = xmlTokenStream.getReader();
+    const runs = rich && new RichTextCollector(rich.color);
     let index = 0;
     let inText = false;
+    let inPhonetic = false;
     let currentString = '';
 
     try {
@@ -126,15 +122,25 @@ export class SheetReader {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const token = value as XmlToken;
-        if (token.type === 'startElement' && token.name === 't') {
-          inText = true;
-          currentString = '';
-        } else if (token.type === 'text' && inText) {
-          currentString += token.value;
-        } else if (token.type === 'endElement' && token.name === 't') {
-          inText = false;
-          map.set(index++, currentString);
+        for (const token of (Array.isArray(value) ? value : [value]) as XmlToken[]) {
+          runs?.token(token);
+          if (token.type === 'startElement' && token.name === 'si') {
+            currentString = '';
+            runs?.reset();
+          } else if (token.type === 'startElement' && token.name === 'rPh') {
+            inPhonetic = true; // phonetic hints are not part of the cell text
+          } else if (token.type === 'endElement' && token.name === 'rPh') {
+            inPhonetic = false;
+          } else if (token.type === 'startElement' && token.name === 't' && !inPhonetic) {
+            inText = true;
+          } else if (token.type === 'text' && inText) {
+            currentString += token.value;
+          } else if (token.type === 'endElement' && token.name === 't') {
+            inText = false;
+          } else if (token.type === 'endElement' && token.name === 'si') {
+            if (runs?.runs.length) rich!.map.set(index, runs.runs);
+            map.set(index++, decodeXString(currentString));
+          }
         }
       }
     } finally {
@@ -142,46 +148,166 @@ export class SheetReader {
     }
   }
 
-  private async parseStyles(xmlTokenStream: ReadableStream<XmlToken>, map: Map<number, number>) {
+  // Fills `dateStyles` (style index -> 14 when it formats dates), returns each style as a CellStyle and the
+  // colour resolver for this workbook (theme + its indexed palette).
+  private async parseStyles(xmlTokenStream: ReadableStream<XmlToken | XmlToken[]>, dateStyles: Map<number, number>, theme: string[]) {
     const reader = xmlTokenStream.getReader();
-    let index = 0;
-    let inCellXfs = false;
-    let inNumFmts = false;
+    const numFmts = new Map<number, string>(BUILTIN_NUM_FMTS);
     const customDateFmts = new Set<number>();
+    const fonts: (CellFont | undefined)[] = [];
+    const fills: (CellFill | GradientFill | undefined)[] = [];
+    const borders: (CellBorder | undefined)[] = [];
+    const cellStyles: (CellStyle | undefined)[] = [];
+
+    // Only direct children of these lists count: dxfs and cellStyleXfs reuse the same element names
+    let section = '';
+    let font: CellFont | undefined;
+    let fill: CellFill | GradientFill | undefined;
+    let pattern = '';
+    let border: CellBorder | undefined;
+    let side: BorderSide | undefined;
+    let xf: CellStyle | undefined;
+    // A custom palette (<colors>) comes after the styles that use it, so colours are resolved at the end
+    const palette: string[] = [];
+    const colors: [Record<string, string>, (argb: string) => void][] = [];
+    const later = (a: Record<string, string>, set: (argb: string) => void) => colors.push([a, set]);
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const token = value as XmlToken;
-        if (token.type === 'startElement') {
-          if (token.name === 'numFmts') inNumFmts = true;
-          else if (token.name === 'cellXfs') inCellXfs = true;
-          else if (token.name === 'numFmt' && inNumFmts) {
-            const id = parseInt(token.attributes['numFmtId'] || '0', 10);
-            const formatCode = token.attributes['formatCode'] || '';
-            if (/[ymdhms]/i.test(formatCode)) {
-              customDateFmts.add(id);
+        for (const token of (Array.isArray(value) ? value : [value]) as XmlToken[]) {
+          if (token.type === 'startElement') {
+            const a = token.attributes;
+            if (font) { const f = font; if (applyFontElement(f, token.name, a, c => later(c, argb => { f.color = argb; }))) continue; }
+            switch (token.name) {
+              case 'numFmts': case 'fonts': case 'fills': case 'borders': case 'cellXfs':
+                section = token.name;
+                break;
+              case 'numFmt':
+                if (section === 'numFmts') {
+                  const id = parseInt(a['numFmtId'] || '0', 10);
+                  numFmts.set(id, a['formatCode'] || '');
+                  if (isDateFormatCode(a['formatCode'] || '')) customDateFmts.add(id);
+                }
+                break;
+              case 'font':
+                if (section === 'fonts') font = {};
+                break;
+              case 'rgbColor':
+                if (section === 'indexedColors') palette.push(a['rgb'] ?? '');
+                break;
+              case 'indexedColors':
+                section = token.name;
+                break;
+              case 'color':
+                if (side) { const target = side; later(a, c => { target.color = c; }); }
+                else if (font) { const target = font; later(a, c => { target.color = c; }); }
+                else if (fill?.type === 'gradient' && fill.stops.length) { const stop = fill.stops[fill.stops.length - 1]; later(a, c => { stop.color = c; }); }
+                break;
+              case 'fill':
+                if (section === 'fills') fills.push(fill = undefined);
+                break;
+              case 'patternFill':
+                pattern = a['patternType'] || '';
+                break;
+              case 'fgColor':
+                if (section === 'fills' && pattern === 'solid') {
+                  const solid: CellFill = fill = { type: 'solid', fgColor: '' };
+                  later(a, c => { solid.fgColor = c; });
+                }
+                break;
+              case 'gradientFill':
+                if (section === 'fills') fill = { type: 'gradient', degree: Number(a['degree'] || 0), stops: [] };
+                break;
+              case 'stop':
+                if (fill?.type === 'gradient') fill.stops.push({ position: Number(a['position'] || 0), color: '' });
+                break;
+              case 'border':
+                if (section === 'borders') border = {};
+                break;
+              case 'left': case 'right': case 'top': case 'bottom':
+                if (border && a['style'] && a['style'] !== 'none') {
+                  side = border[token.name as 'left'] = { style: a['style'] as BorderSide['style'] };
+                }
+                break;
+              case 'xf':
+                if (section === 'cellXfs') {
+                  const index = cellStyles.length;
+                  const numFmtId = parseInt(a['numFmtId'] || '0', 10);
+                  // Builtin date/time ids (27-36 and 50-58 are dates in CJK locales)
+                  const isDate = (numFmtId >= 14 && numFmtId <= 22) || (numFmtId >= 27 && numFmtId <= 36)
+                    || (numFmtId >= 45 && numFmtId <= 47) || (numFmtId >= 50 && numFmtId <= 58) || customDateFmts.has(numFmtId);
+                  dateStyles.set(index, isDate ? 14 : 0);
+
+                  xf = {};
+                  const fontId = parseInt(a['fontId'] || '0', 10);
+                  const fillId = parseInt(a['fillId'] || '0', 10);
+                  const borderId = parseInt(a['borderId'] || '0', 10);
+                  // Font 0 is the workbook default; fills 0 and 1 are the mandatory none/gray125
+                  if (fontId > 0 && fonts[fontId]) xf.font = fonts[fontId];
+                  if (fillId > 1 && fills[fillId]) xf.fill = fills[fillId];
+                  if (borders[borderId]) xf.border = borders[borderId];
+                  if (numFmtId > 0 && numFmts.has(numFmtId)) xf.numFmt = numFmts.get(numFmtId);
+                  cellStyles.push(xf);
+                }
+                break;
+              case 'alignment':
+                if (xf) {
+                  const alignment: CellAlignment = {};
+                  if (a['horizontal']) alignment.horizontal = a['horizontal'] as CellAlignment['horizontal'];
+                  if (a['vertical']) alignment.vertical = a['vertical'] as CellAlignment['vertical'];
+                  if (a['wrapText'] === '1' || a['wrapText'] === 'true') alignment.wrapText = true;
+                  if (Object.keys(alignment).length) xf.alignment = alignment;
+                }
+                break;
             }
-          } else if (token.name === 'xf' && inCellXfs) {
-            const numFmtId = parseInt(token.attributes['numFmtId'] || '0', 10);
-            const isDate = (numFmtId >= 14 && numFmtId <= 22) || (numFmtId >= 45 && numFmtId <= 47) || customDateFmts.has(numFmtId);
-            map.set(index++, isDate ? 14 : 0);
+          } else if (token.type === 'endElement') {
+            switch (token.name) {
+              case 'numFmts': case 'fonts': case 'fills': case 'borders': case 'cellXfs': case 'indexedColors':
+                section = '';
+                break;
+              case 'font':
+                if (font) fonts.push(font);
+                font = undefined;
+                break;
+              case 'fill':
+                if (section === 'fills') fills[fills.length - 1] = fill;
+                fill = undefined;
+                pattern = '';
+                break;
+              case 'left': case 'right': case 'top': case 'bottom':
+                side = undefined;
+                break;
+              case 'border':
+                if (border) borders.push(Object.keys(border).length ? border : undefined);
+                border = undefined;
+                break;
+              case 'xf':
+                xf = undefined;
+                break;
+            }
           }
-        } else if (token.type === 'endElement') {
-          if (token.name === 'numFmts') inNumFmts = false;
-          else if (token.name === 'cellXfs') inCellXfs = false;
         }
       }
     } finally {
       reader.releaseLock();
     }
+    const color = colorResolver(theme, palette.length ? palette : undefined);
+    for (const [a, set] of colors) {
+      const argb = color(a);
+      if (argb) set(argb);
+    }
+    // Colours that did not resolve (auto, unknown theme slot) are dropped; so is a solid fill without one
+    for (const f of fills) if (f?.type === 'solid' && !f.fgColor) fills[fills.indexOf(f)] = undefined;
+    for (const f of fills) if (f?.type === 'gradient') f.stops = f.stops.filter(st => st.color);
+    for (const st of cellStyles) if (st?.fill && !fills.includes(st.fill)) delete st.fill;
+    // Default-looking styles report as no style
+    return { cellStyles: cellStyles.map(st => (st && Object.keys(st).length ? st : undefined)), color };
   }
 
-  private async readStreamToString(entry: ZipEntry): Promise<string> {
-    let stream = entry.stream;
-    if (entry.compressionMethod === 8) stream = stream.pipeThrough(new DecompressionStream('deflate-raw') as any);
+  private async readStreamToString(stream: ReadableStream<Uint8Array>): Promise<string> {
     const textDecoder = new TextDecoderStream();
     const reader = stream.pipeThrough(textDecoder as any).getReader();
     let result = '';
@@ -193,3 +319,4 @@ export class SheetReader {
     return result;
   }
 }
+

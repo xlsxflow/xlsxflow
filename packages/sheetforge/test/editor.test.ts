@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SheetEditor } from '../src/core/editor';
+import { createBlobReader } from '../src/core/random-access';
 
 describe('SheetEditor', () => {
   it('should preserve unknown files and modify targeted sheets', async () => {
@@ -31,8 +32,8 @@ describe('SheetEditor', () => {
     const editor = new SheetEditor();
     editor.appendSheet('Sheet1', [[3, 4]]);
     
-    const stream = new ReadableStream({ start(c) { c.enqueue(originalBytes); c.close(); } });
-    const newStream = editor.edit(stream);
+    const fileReaderIn = createBlobReader(new Blob([originalBytes]));
+    const newStream = editor.edit(fileReaderIn);
     const reader2 = newStream.getReader();
     const newChunks: Uint8Array[] = [];
     while (true) {
@@ -55,8 +56,8 @@ describe('SheetEditor', () => {
     // Check that we can read it back
     const { SheetReader } = await import('../src/core/index');
     const reader = new SheetReader();
-    const resultStream = new ReadableStream({ start(c) { c.enqueue(newBytes); c.close(); } });
-    const parsed = await reader.parse(resultStream, { sheetName: 'Sheet1' });
+    const fileReaderOut = createBlobReader(new Blob([newBytes]));
+    const parsed = await reader.parse(fileReaderOut, { sheetName: 'Sheet1' });
     
     const rows = [];
     for await (const row of parsed) {
@@ -65,7 +66,7 @@ describe('SheetEditor', () => {
     
     // We started with [[1,2]], and appended [[3,4]]. Total should be 2 rows.
     expect(rows.length).toBe(2);
-    expect(rows[0]).toEqual([1, 2]);
-    expect(rows[1]).toEqual([3, 4]);
+    expect(rows[0].cells).toEqual([1, 2]);
+    expect(rows[1].cells).toEqual([3, 4]);
   });
 });

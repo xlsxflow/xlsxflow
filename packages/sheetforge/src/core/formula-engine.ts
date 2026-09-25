@@ -220,14 +220,14 @@ export class FormulaEngine {
     if (node.type === 'CALL') {
       const args = node.args!.map(a => this.evaluateAst(a));
       switch (node.name) {
-        case 'SUM': return this.flatten(args).reduce((a, b) => a + Number(b), 0);
+        case 'SUM': return this.numbers(args).reduce((a, b) => a + b, 0);
         case 'AVERAGE': {
-          const flat = this.flatten(args);
-          return flat.length ? flat.reduce((a, b) => a + Number(b), 0) / flat.length : 0;
+          const nums = this.numbers(args);
+          return nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : '#DIV/0!';
         }
-        case 'COUNT': return this.flatten(args).length;
-        case 'MAX': return Math.max(...this.flatten(args).map(Number));
-        case 'MIN': return Math.min(...this.flatten(args).map(Number));
+        case 'COUNT': return this.numbers(args).length;
+        case 'MAX': { const nums = this.numbers(args); return nums.length ? nums.reduce((a, b) => a > b ? a : b) : 0; }
+        case 'MIN': { const nums = this.numbers(args); return nums.length ? nums.reduce((a, b) => a < b ? a : b) : 0; }
         case 'IF': return args[0] ? args[1] : args[2];
         case 'CONCATENATE': return this.flatten(args).join('');
       }
@@ -235,8 +235,13 @@ export class FormulaEngine {
     return null;
   }
 
+  // Like Excel aggregates: only numeric values count; text, booleans and blanks are skipped.
+  private numbers(args: any[]): number[] {
+    return this.flatten(args).filter((v): v is number => typeof v === 'number' && !isNaN(v));
+  }
+
   private flatten(arr: any[]): any[] {
-    return arr.reduce((acc, val) => Array.isArray(val) ? acc.concat(this.flatten(val)) : acc.concat(val), []);
+    return arr.flat(Infinity);
   }
 
   private getRangeValues(range: string): any[] {
@@ -247,7 +252,7 @@ export class FormulaEngine {
     for (let r = startRow; r <= endRow; r++) {
       for (let c = startCol; c <= endCol; c++) {
         const ref = this.toRef(r, c - 1);
-        values.push(this.cells.get(ref) ?? 0);
+        values.push(this.cells.get(ref) ?? null);
       }
     }
     return values;

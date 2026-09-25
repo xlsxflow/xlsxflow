@@ -1,7 +1,8 @@
-export type CellValue = string | number | boolean | null;
+export type CellValue = string | number | boolean | Date | null;
 
 export interface BorderSide {
-  style: 'thin' | 'medium' | 'thick' | 'dashed' | 'dotted' | 'double';
+  style: 'thin' | 'medium' | 'thick' | 'dashed' | 'dotted' | 'double' | 'hair' | 'mediumDashed'
+    | 'dashDot' | 'mediumDashDot' | 'dashDotDot' | 'mediumDashDotDot' | 'slantDashDot';
   color?: string; // ARGB hex e.g. "FF000000"
 }
 
@@ -38,8 +39,8 @@ export interface CellFont {
 }
 
 export interface CellAlignment {
-  horizontal?: 'left' | 'center' | 'right' | 'fill' | 'justify';
-  vertical?: 'top' | 'middle' | 'bottom';
+  horizontal?: 'general' | 'left' | 'center' | 'right' | 'fill' | 'justify' | 'centerContinuous' | 'distributed';
+  vertical?: 'top' | 'center' | 'middle' | 'bottom' | 'justify' | 'distributed'; // 'middle' is written as 'center'
   wrapText?: boolean;
 }
 
@@ -76,6 +77,13 @@ export interface StyledCell {
   value: CellValue;
   style?: CellStyle;
   formula?: string; // e.g. "=SUM(A1:A10)"
+  hyperlink?: string; // URL, or "#Sheet2!A1" for a location in the workbook
+  richText?: RichTextRun[]; // written instead of value (value still feeds formulas)
+}
+
+export interface RichTextRun {
+  text: string;
+  font?: CellFont;
 }
 
 export type Row = (CellValue | StyledCell)[];
@@ -96,5 +104,7 @@ export interface SheetOptions {
   conditionalFormats?: ConditionalFormat[];
   dataValidations?: DataValidation[];
   mergeCells?: string[]; // e.g. ["A1:C1", "D1:E2"]
+  autoFitColumns?: boolean;
   freezePanes?: { row?: number, col?: number };
+  autoFilter?: string; // e.g. "A1:D1"
 }

@@ -1,5 +1,21 @@
 import { CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment } from './types';
 
+function escapeXml(val: string): string {
+  return val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Child elements of a <font> (styles) or, with nameTag "rFont", of a rich text run's <rPr>
+export function fontXml(font: CellFont, nameTag = 'name'): string {
+  let xml = '';
+  if (font.bold) xml += '<b/>';
+  if (font.italic) xml += '<i/>';
+  if (font.underline) xml += '<u/>';
+  if (font.size) xml += `<sz val="${font.size}"/>`;
+  if (font.color) xml += `<color rgb="${escapeXml(font.color)}"/>`;
+  if (font.name) xml += `<${nameTag} val="${escapeXml(font.name)}"/>`;
+  return xml;
+}
+
 // Registry of unique styles — maps to integer index for OOXML styleSheet
 interface StyleRegistry {
   fonts: Map<string, number>;
@@ -17,6 +33,7 @@ export class StyleEngine {
     numFmts: new Map(),
     cellXfs: [],
   };
+  private xfIndex = new Map<string, number>();
 
   registerStyle(style: CellStyle): number {
     const fontId = style.font ? this.registerFont(style.font) : 0;
@@ -25,27 +42,20 @@ export class StyleEngine {
     const numFmtId = style.numFmt ? this.registerNumFmt(style.numFmt) : 0;
     const alignmentXml = style.alignment ? this.buildAlignmentXml(style.alignment) : '';
 
-    const existingIdx = this.registry.cellXfs.findIndex(xf => 
-      xf.fontId === fontId && 
-      xf.fillId === fillId && 
-      xf.borderId === borderId && 
-      xf.numFmtId === numFmtId && 
-      xf.alignmentXml === alignmentXml
-    );
+    const key = `${fontId}|${fillId}|${borderId}|${numFmtId}|${alignmentXml}`;
+    const existing = this.xfIndex.get(key);
+    if (existing !== undefined) return existing;
 
-    if (existingIdx !== -1) {
-      return existingIdx + 1;
-    }
-
-    const xf = { fontId, fillId, borderId, numFmtId, alignmentXml };
-    this.registry.cellXfs.push(xf);
-    return this.registry.cellXfs.length; // 1-based because 0 is the default xf
+    this.registry.cellXfs.push({ fontId, fillId, borderId, numFmtId, alignmentXml });
+    const id = this.registry.cellXfs.length; // 1-based because 0 is the default xf
+    this.xfIndex.set(key, id);
+    return id;
   }
 
   private registerFont(font: CellFont): number {
     const key = JSON.stringify(font);
     if (this.registry.fonts.has(key)) return this.registry.fonts.get(key)!;
-    const id = this.registry.fonts.size;
+    const id = this.registry.fonts.size + 1; // slot 0 = default font
     this.registry.fonts.set(key, id);
     return id;
   }
@@ -53,7 +63,7 @@ export class StyleEngine {
   private registerFill(fill: CellFill | GradientFill): number {
     const key = JSON.stringify(fill);
     if (this.registry.fills.has(key)) return this.registry.fills.get(key)!;
-    const id = this.registry.fills.size;
+    const id = this.registry.fills.size + 2; // slots 0-1 = required none/gray125
     this.registry.fills.set(key, id);
     return id;
   }
@@ -61,7 +71,7 @@ export class StyleEngine {
   private registerBorder(border: CellBorder): number {
     const key = JSON.stringify(border);
     if (this.registry.borders.has(key)) return this.registry.borders.get(key)!;
-    const id = this.registry.borders.size;
+    const id = this.registry.borders.size + 1; // slot 0 = empty border
     this.registry.borders.set(key, id);
     return id;
   }
@@ -76,7 +86,8 @@ export class StyleEngine {
   private buildAlignmentXml(alignment: CellAlignment): string {
     const attrs: string[] = [];
     if (alignment.horizontal) attrs.push(`horizontal="${alignment.horizontal}"`);
-    if (alignment.vertical) attrs.push(`vertical="${alignment.vertical}"`);
+    // OOXML has no "middle"; Excel repairs the file if it sees one
+    if (alignment.vertical) attrs.push(`vertical="${alignment.vertical === 'middle' ? 'center' : alignment.vertical}"`);
     if (alignment.wrapText) attrs.push(`wrapText="1"`);
     return attrs.length ? `<alignment ${attrs.join(' ')}/>` : '';
   }
@@ -95,9 +106,11 @@ ${numFmtsXml}
 ${fontsXml}
 ${fillsXml}
 ${bordersXml}
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
 <cellXfs count="${this.registry.cellXfs.length + 1}">
 ${cellXfsXml}
 </cellXfs>
+<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
   }
 
@@ -105,7 +118,7 @@ ${cellXfsXml}
     if (this.registry.numFmts.size === 0) return '';
     const entries: string[] = [];
     for (const [fmt, id] of this.registry.numFmts) {
-      entries.push(`<numFmt numFmtId="${id}" formatCode="${fmt}"/>`);
+      entries.push(`<numFmt numFmtId="${id}" formatCode="${escapeXml(fmt)}"/>`);
     }
     return `<numFmts count="${entries.length}">${entries.join('')}</numFmts>`;
   }
@@ -116,15 +129,7 @@ ${cellXfsXml}
     ];
 
     for (const [key] of this.registry.fonts) {
-      const font: CellFont = JSON.parse(key);
-      const parts: string[] = [];
-      if (font.bold) parts.push('<b/>');
-      if (font.italic) parts.push('<i/>');
-      if (font.underline) parts.push('<u/>');
-      if (font.size) parts.push(`<sz val="${font.size}"/>`);
-      if (font.color) parts.push(`<color rgb="${font.color}"/>`);
-      if (font.name) parts.push(`<name val="${font.name}"/>`);
-      fontEntries.push(`<font>${parts.join('')}</font>`);
+      fontEntries.push(`<font>${fontXml(JSON.parse(key))}</font>`);
     }
 
     return `<fonts count="${fontEntries.length}">${fontEntries.join('')}</fonts>`;
@@ -140,12 +145,12 @@ ${cellXfsXml}
       const fill: CellFill | GradientFill = JSON.parse(key);
       if (fill.type === 'solid') {
         fillEntries.push(
-          `<fill><patternFill patternType="solid"><fgColor rgb="${fill.fgColor}"/></patternFill></fill>`
+          `<fill><patternFill patternType="solid"><fgColor rgb="${escapeXml(fill.fgColor)}"/></patternFill></fill>`
         );
       } else if (fill.type === 'gradient') {
         const gf = fill as GradientFill;
         const stops = gf.stops.map(s =>
-          `<gradientStop position="${s.position}"><color rgb="${s.color}"/></gradientStop>`
+          `<stop position="${s.position}"><color rgb="${escapeXml(s.color)}"/></stop>`
         ).join('');
         fillEntries.push(`<fill><gradientFill degree="${gf.degree ?? 0}">${stops}</gradientFill></fill>`);
       }
@@ -155,10 +160,10 @@ ${cellXfsXml}
   }
 
   private buildBordersXml(): string {
-    const buildSide = (side?: { style: string; color?: string }) =>
-      side
-        ? `<border style="${side.style}">${side.color ? `<color rgb="${side.color}"/>` : ''}</border>`
-        : '<border/>';
+    const side = (tag: string, b?: { style: string; color?: string }) =>
+      b
+        ? `<${tag} style="${b.style}">${b.color ? `<color rgb="${escapeXml(b.color)}"/>` : ''}</${tag}>`
+        : `<${tag}/>`;
 
     const borderEntries: string[] = [
       '<border><left/><right/><top/><bottom/><diagonal/></border>'
@@ -166,9 +171,7 @@ ${cellXfsXml}
 
     for (const [key] of this.registry.borders) {
       const b: CellBorder = JSON.parse(key);
-      borderEntries.push(
-        `<border><left${b.left ? ` style="${b.left.style}"` : ''}/><right${b.right ? ` style="${b.right.style}"` : ''}/><top${b.top ? ` style="${b.top.style}"` : ''}/><bottom${b.bottom ? ` style="${b.bottom.style}"` : ''}/></border>`
-      );
+      borderEntries.push(`<border>${side('left', b.left)}${side('right', b.right)}${side('top', b.top)}${side('bottom', b.bottom)}<diagonal/></border>`);
     }
 
     return `<borders count="${borderEntries.length}">${borderEntries.join('')}</borders>`;
@@ -182,7 +185,7 @@ ${cellXfsXml}
 
     for (const xf of this.registry.cellXfs) {
       entries.push(
-        `<xf numFmtId="${xf.numFmtId}" fontId="${xf.fontId}" fillId="${xf.fillId}" borderId="${xf.borderId}" xfId="0" applyFont="1" applyFill="1" applyBorder="1">${xf.alignmentXml}</xf>`
+        `<xf numFmtId="${xf.numFmtId}" fontId="${xf.fontId}" fillId="${xf.fillId}" borderId="${xf.borderId}" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1" applyBorder="1"${xf.alignmentXml ? ' applyAlignment="1"' : ''}>${xf.alignmentXml}</xf>`
       );
     }
 

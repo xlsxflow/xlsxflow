@@ -1,36 +1,27 @@
 import typescript from '@rollup/plugin-typescript';
-import terser from '@rollup/plugin-terser';
+import { dts } from 'rollup-plugin-dts';
 
-export default {
-  input: {
-    core: 'src/core/index.ts',
-    pro: 'src/pro/index.ts'
+// Node built-ins are only loaded lazily by createFileReader()
+const external = ['fs', 'fs/promises', 'stream'];
+
+export default [
+  {
+    input: 'src/index.ts',
+    output: [
+      { file: 'dist/index.mjs', format: 'es', sourcemap: true },
+      { file: 'dist/index.cjs', format: 'cjs', sourcemap: true },
+    ],
+    external,
+    plugins: [typescript({ declaration: false, declarationDir: undefined, exclude: ['test/**', 'scripts/**'] })],
   },
-  output: [
-    {
-      dir: 'dist',
-      format: 'es',
-      entryFileNames: '[name].mjs',
-      chunkFileNames: '[name]-[hash].mjs'
-    },
-    {
-      dir: 'dist',
-      format: 'cjs',
-      entryFileNames: '[name].js',
-      chunkFileNames: '[name]-[hash].js'
-    }
-  ],
-  plugins: [
-    typescript(),
-    // In a real build, we would have a custom encryption plugin here before terser.
-    terser({
-      compress: {
-        passes: 2,
-        drop_console: true,
-      },
-      mangle: {
-        toplevel: true,
-      },
-    })
-  ]
-};
+  {
+    // Single bundled declaration file: no extensionless relative imports for nodenext consumers.
+    input: 'src/index.ts',
+    output: [
+      { file: 'dist/index.d.ts', format: 'es' },
+      { file: 'dist/index.d.cts', format: 'es' },
+    ],
+    external,
+    plugins: [dts()],
+  },
+];

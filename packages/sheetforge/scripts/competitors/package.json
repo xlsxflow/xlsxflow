@@ -1,0 +1,24 @@
+{
+  "name": "competitors",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "excel-export": "^0.5.1",
+    "excel4node": "^1.8.2",
+    "exceljs": "^4.4.0",
+    "js-export-excel": "^1.1.4",
+    "json2xls": "^0.1.2",
+    "msexcel-builder": "^0.0.2",
+    "write-excel-file": "^4.1.1",
+    "xlsx": "^0.18.5",
+    "xlsx-populate": "^1.21.0"
+  }
+}
