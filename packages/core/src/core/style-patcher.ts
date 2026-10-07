@@ -7,6 +7,8 @@ const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
 const FONT_TAGS: [keyof CellFont, string][] = [
   ['bold', 'b'], ['italic', 'i'], ['underline', 'u'], ['size', 'sz'], ['color', 'color'], ['name', 'name'],
 ];
+// CT_Font child order, which Excel writes and the schema checks
+const FONT_ORDER = ['b', 'i', 'strike', 'condense', 'extend', 'outline', 'shadow', 'u', 'vertAlign', 'sz', 'color', 'name', 'family', 'charset', 'scheme'];
 const SIDES = ['left', 'right', 'top', 'bottom'] as const;
 // CT_Stylesheet child order, to place a section the file does not have yet
 const SECTIONS = ['numFmts', 'fonts', 'fills', 'borders', 'cellStyleXfs', 'cellXfs', 'cellStyles', 'dxfs', 'tableStyles', 'colors', 'extLst'];
@@ -68,6 +70,8 @@ export class StylePatcher {
         font = font.replace(new RegExp(`<${p}${tag}\\b[^>]*?(?:/>|>[\\s\\S]*?</${p}${tag}>)`, 'g'), '');
         if (style.font[key] !== undefined && style.font[key] !== false) font += this.prefix(fontXml({ [key]: style.font[key] }));
       }
+      const rank = (el: string) => (FONT_ORDER.indexOf(/^<(?:\w+:)?(\w+)/.exec(el)![1]) + 1 || FONT_ORDER.length + 1);
+      font = (font.match(/<((?:\w+:)?\w+)\b[^>]*?(?:\/>|>[\s\S]*?<\/\1>)/g) ?? []).sort((a, b) => rank(a) - rank(b)).join('');
       open = setAttr(setAttr(open, 'fontId', String(this.add('fonts', `<${p}font>${font}</${p}font>`))), 'applyFont', '1');
     }
     if (style.fill) {

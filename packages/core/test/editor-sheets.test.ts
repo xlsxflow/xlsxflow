@@ -46,6 +46,8 @@ describe('SheetEditor styles', () => {
     expect(rows[1].styles?.[2]).toMatchObject({ font: { bold: true } });
     expect(rows[1].formulas?.[3]).toBe('B1*2');
     expect(rows[1].styles?.[3]).toMatchObject({ font: { bold: true } });
+    // Font children keep the schema's order: italic merged into a font with colour goes first
+    expect(await entry(out, 'xl/styles.xml')).toMatch(/<font><i\/><color rgb="FF0000FF"\/><\/font>/);
 
     // The same change on two cells adds one format
     const styles = await entry(out, 'xl/styles.xml');

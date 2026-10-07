@@ -1,12 +1,16 @@
-"""Checks edited workbooks in LibreOffice.
+"""Checks edited workbooks against Excel's file schema and in LibreOffice.
 
-LibreOffice opens each file built by make.ts, recalculates every formula itself (the files' cached
-values are ignored) and saves a copy. The check passes when every expected value matches and the
-copy keeps the same merges, rules, validations, tables, notes, pictures, charts, filters and
-protection as the original.
+Schema check: Microsoft's Open XML SDK (scripts/openxml/validate.cs) checks each file built by make.ts
+against the rules Excel is strict about. A file edited from an openpyxl workbook only fails on errors
+its source does not already have.
 
-Needs Python with openpyxl, Node (npx tsx) and LibreOffice. Set SOFFICE when soffice is not on PATH
-or in its default place. Run from anywhere:
+LibreOffice check: LibreOffice opens each file, recalculates every formula itself (the files' cached
+values are ignored) and saves a copy. It passes when every expected value matches and the copy keeps
+the same merges, rules, validations, tables, notes, pictures, charts, filters and protection.
+
+Needs Python with openpyxl and Node (npx tsx), plus the .NET 10 SDK for the schema check and
+LibreOffice for the other; a check whose tool is missing is skipped. Set SOFFICE when soffice is not
+on PATH or in its default place. Run from anywhere:
 
     python packages/core/scripts/libreoffice/check.py
 """
@@ -36,7 +40,7 @@ def find_soffice():
                       '/Applications/LibreOffice.app/Contents/MacOS/soffice'):
         if candidate and pathlib.Path(candidate).exists():
             return candidate
-    sys.exit('LibreOffice not found: install it or set SOFFICE')
+    return None
 
 
 def openpyxl_sources():
@@ -118,13 +122,35 @@ def same_value(got, want):
     return got == want
 
 
-def main():
-    soffice = find_soffice()
-    shutil.rmtree(OUT, ignore_errors=True)
-    OUT.mkdir()
-    openpyxl_sources()
-    subprocess.run('npx tsx scripts/libreoffice/make.ts scripts/libreoffice/out', shell=True, check=True, cwd=HERE.parents[1])
+def schema_errors(paths):
+    """{file name: [error]} from the Open XML SDK"""
+    run = subprocess.run(['dotnet', 'run', 'validate.cs', '--', *map(str, paths)],
+                         cwd=HERE.parent / 'openxml', capture_output=True, text=True)
+    errors, current = {}, None
+    for line in run.stdout.splitlines():
+        if line.startswith(('ok   ', 'FAIL ')):
+            current = line[5:].split(':')[0]
+            errors[current] = [line[5 + len(current) + 2:]] if ':' in line[5:] else []
+        elif line.startswith('     ') and current:
+            errors[current].append(line.strip())
+    if not errors:
+        sys.exit('Schema check could not run:\n' + run.stdout + run.stderr)
+    return errors
 
+
+def schema_check(expected):
+    errors = schema_errors([OUT / name for name in expected] + [OUT / 'openpyxl-rows.xlsx', OUT / 'openpyxl-cols.xlsx'])
+    failures = 0
+    for name in expected:
+        source = 'openpyxl-rows.xlsx' if name.startswith('openpyxl-rows') else 'openpyxl-cols.xlsx' if name.startswith('openpyxl-cols') else None
+        new = [e for e in errors[name] if not source or e not in errors[source]]
+        print(('ok   ' if not new else 'FAIL ') + name + ''.join('\n     ' + e for e in new[:10]))
+        failures += bool(new)
+    print(f'{len(expected) - failures} of {len(expected)} files passed the schema check')
+    return failures
+
+
+def libreoffice_check(soffice, expected):
     # A private profile that recalculates every formula when an xlsx file is loaded
     profile = OUT / 'profile'
     (profile / 'user').mkdir(parents=True)
@@ -135,7 +161,6 @@ def main():
         '<value>0</value></prop></item></oor:items>\n')
 
     saved = OUT / 'libreoffice'
-    expected = json.loads((OUT / 'expected.json').read_text())
     failures = 0
     for name, cells in expected.items():
         subprocess.run([soffice, '--headless', '--norestore', f'-env:UserInstallation={profile.as_uri()}',
@@ -160,8 +185,31 @@ def main():
                     problems.append(f'{sheet} {feature}: {value!r} became {other!r}')
         print(('ok   ' if not problems else 'FAIL ') + name + ('' if not problems else ': ' + '; '.join(problems)))
         failures += bool(problems)
+    print(f'{len(expected) - failures} of {len(expected)} files passed in LibreOffice')
+    return failures
 
-    print(f'{len(expected) - failures} of {len(expected)} files passed')
+
+def main():
+    shutil.rmtree(OUT, ignore_errors=True)
+    OUT.mkdir()
+    openpyxl_sources()
+    subprocess.run('npx tsx scripts/libreoffice/make.ts scripts/libreoffice/out', shell=True, check=True, cwd=HERE.parents[1])
+    expected = json.loads((OUT / 'expected.json').read_text())
+
+    failures, ran = 0, 0
+    if shutil.which('dotnet'):
+        failures += schema_check(expected)
+        ran += 1
+    else:
+        print('Schema check skipped: the .NET 10 SDK (dotnet) was not found')
+    soffice = find_soffice()
+    if soffice:
+        failures += libreoffice_check(soffice, expected)
+        ran += 1
+    else:
+        print('LibreOffice check skipped: LibreOffice was not found (install it or set SOFFICE)')
+    if not ran:
+        sys.exit('No check ran')
     sys.exit(1 if failures else 0)
 
 
