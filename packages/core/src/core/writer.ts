@@ -1,9 +1,9 @@
-import { Row, StyledCell, CellValue, SheetOptions, SheetImage, CellComment, TableOptions, PageSetup } from './types';
+import { Row, StyledCell, CellValue, SheetOptions, SheetImage, CellComment, TableOptions, PageSetup, RichTextRun } from './types';
 import { StyleEngine, fontXml } from './style-engine';
 import { ConditionalFormatter } from './conditional-formatter';
 import { FormulaEngine } from './formula-engine';
 import { ZipStreamWriter } from './zip-stream-writer';
-import { encodeXString, colLetter, colIndex, dateToSerial } from './utils';
+import { encodeXString, colLetter, colIndex, dateToSerial, validateSheetName } from './utils';
 import { imageInfo, drawingXml, type ImageInfo } from './image';
 
 function escapeXml(val: string): string {
@@ -29,6 +29,10 @@ function stringXml(s: string): string {
   // Leading/trailing whitespace is dropped by Excel unless marked as preserved
   return /^\s|\s$/.test(s) ? `<t xml:space="preserve">${text}</t>` : `<t>${text}</t>`;
 }
+
+// Rich text runs; plain text is one unformatted run
+const runsXml = (text: string | RichTextRun[]) => typeof text === 'string' ? `<r>${stringXml(text)}</r>`
+  : text.map(run => `<r>${run.font ? `<rPr>${fontXml(run.font, 'rFont')}</rPr>` : ''}${stringXml(run.text)}</r>`).join('');
 
 const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
@@ -72,11 +76,7 @@ export class SheetWriter {
   constructor(private writerOptions: WriterOptions = {}) {}
 
   addSheet(name: string, rows: Row[] | AsyncIterable<Row>, options: SheetOptions = {}): this {
-    // Excel refuses to open a workbook that breaks these rules
-    if (!name || name.length > 31 || /[\\/?*:[\]]/.test(name) || name.startsWith("'") || name.endsWith("'")) {
-      throw new Error(`Invalid sheet name "${name}": 1-31 characters, none of \\ / ? * : [ ], and no leading or trailing apostrophe.`);
-    }
-    if (this.sheets.some(s => s.name.toLowerCase() === name.toLowerCase())) throw new Error(`Duplicate sheet name "${name}".`);
+    validateSheetName(name, this.sheets.map(s => s.name));
     this.sheets.push({ name, rows, options });
     return this;
   }
@@ -356,9 +356,7 @@ export class SheetWriter {
 
         if (styledCell.richText) {
           // Rich text is always inline, even with sharedStrings on
-          const runs = styledCell.richText.map(run =>
-            `<r>${run.font ? `<rPr>${fontXml(run.font, 'rFont')}</rPr>` : ''}${stringXml(run.text)}</r>`).join('');
-          return `<c r="${colRef}" t="inlineStr"${sAttr}><is>${runs}</is></c>`;
+          return `<c r="${colRef}" t="inlineStr"${sAttr}><is>${runsXml(styledCell.richText)}</is></c>`;
         }
         if (val === null || val === undefined) return `<c r="${colRef}"${sAttr}/>`;
         if (typeof val === 'boolean') return `<c r="${colRef}" t="b"${sAttr}><v>${val ? 1 : 0}</v></c>`;
@@ -576,7 +574,7 @@ function pageSetupXml(page?: PageSetup): string {
 
 function commentsXml(comments: SheetParts['comments']): string {
   const authors = [...new Set(comments.map(c => c.comment.author ?? ''))];
-  const list = comments.map(c => `<comment ref="${c.ref}" authorId="${authors.indexOf(c.comment.author ?? '')}"><text><r>${stringXml(c.comment.text)}</r></text></comment>`).join('');
+  const list = comments.map(c => `<comment ref="${c.ref}" authorId="${authors.indexOf(c.comment.author ?? '')}"><text>${runsXml(c.comment.text)}</text></comment>`).join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors>${authors.map(a => `<author>${escapeXml(a)}</author>`).join('')}</authors><commentList>${list}</commentList></comments>`;
 }

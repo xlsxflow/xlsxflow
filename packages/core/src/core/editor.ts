@@ -1,21 +1,38 @@
 import { RandomAccessReader } from './random-access';
 import { ZipRandomAccessParser } from './zip-random-access';
-import { Row, SheetOptions, CellValue } from './types';
+import { Row, SheetOptions, CellValue, CellStyle } from './types';
 import { ZipStreamWriter } from './zip-stream-writer';
-import { resolveWorkbookParts, recalcOnOpen, colIndex, colLetter, dateToSerial, encodeXString, shiftFormula } from './utils';
+import { StylePatcher } from './style-patcher';
+import {
+  resolveWorkbookParts, partRelationships, recalcOnOpen, attr, dirOf, relsPathOf, validateSheetName,
+  colIndex, colLetter, dateToSerial, encodeXString, shiftFormula, type WorkbookParts,
+} from './utils';
 
-// A new cell value, or a formula (leading "=" optional). null clears the value.
-export type CellEdit = CellValue | { formula: string };
+// A new cell value; null clears it. The object form sets a formula (leading "=" optional) or a value,
+// and can change the cell's style: only the style properties given change. With neither `value` nor
+// `formula`, the cell keeps its content.
+export type CellEdit = CellValue | { value?: CellValue; formula?: string; style?: CellStyle };
+type EditedRows = Map<number, Map<number, CellEdit>>;
+
+const KEEP = Symbol('keep');
+function contentOf(edit: CellEdit): CellValue | { formula: string } | typeof KEEP {
+  if (edit === null || typeof edit !== 'object' || edit instanceof Date) return edit ?? null;
+  if (edit.formula !== undefined) return { formula: edit.formula };
+  return 'value' in edit ? edit.value ?? null : KEEP;
+}
+const styleOf = (edit: CellEdit) =>
+  edit !== null && typeof edit === 'object' && !(edit instanceof Date) ? edit.style : undefined;
 
 const escapeXml = (val: string) =>
   val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const unescapeXml = (s: string) =>
   s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (m, hex, dec, name) =>
     hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(parseInt(dec, 10))
       : ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[name] ?? m);
 
 // The cell XML for an edit; `attrs` keeps the existing cell's style (s=...) and other attributes
-function editedCell(p: string, ref: string, attrs: string, edit: CellEdit): string {
+function editedCell(p: string, ref: string, attrs: string, edit: CellValue | { formula: string }): string {
   if (edit === null || edit === undefined) return `<${p}c r="${ref}"${attrs}/>`;
   if (typeof edit === 'number') {
     return isFinite(edit) ? `<${p}c r="${ref}"${attrs}><${p}v>${edit}</${p}v></${p}c>` : `<${p}c r="${ref}"${attrs} t="e"><${p}v>#NUM!</${p}v></${p}c>`;
@@ -31,9 +48,37 @@ function editedCell(p: string, ref: string, attrs: string, edit: CellEdit): stri
   return `<${p}c r="${ref}"${attrs} t="inlineStr"><${p}is>${t}</${p}is></${p}c>`;
 }
 
+// The cells of a new sheet, as edits of an empty one
+function rowsToEdits(name: string, rows: Row[]): EditedRows {
+  const edits: EditedRows = new Map();
+  rows.forEach((row, ri) => {
+    const cells = new Map<number, CellEdit>();
+    row.forEach((cell, ci) => {
+      if (cell === null || cell === undefined) return;
+      if (typeof cell !== 'object' || cell instanceof Date) {
+        cells.set(ci, cell);
+        return;
+      }
+      if (cell.hyperlink !== undefined || cell.comment !== undefined) {
+        throw new Error(`Sheet "${name}": SheetEditor.addSheet does not write hyperlinks or notes; use SheetWriter.`);
+      }
+      // Rich text is written as plain text here
+      const value = cell.richText && cell.value == null ? cell.richText.map(r => r.text).join('') : cell.value;
+      cells.set(ci, { value, formula: cell.formula, style: cell.style });
+    });
+    if (cells.size) edits.set(ri + 1, cells);
+  });
+  return edits;
+}
+
+const WORKSHEET_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
+const WORKSHEET_CONTENT = 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
+
 export class SheetEditor {
   private modifications = new Map<string, { rows: Row[], options: SheetOptions }>();
-  private cellEdits = new Map<string, Map<number, Map<number, CellEdit>>>();
+  private cellEdits = new Map<string, EditedRows>();
+  private additions = new Map<string, Row[]>();
+  private deletions = new Set<string>();
 
   // Appends `rows` after the last existing row of sheet `sheetName`.
   appendSheet(sheetName: string, rows: Row[], options: SheetOptions = {}) {
@@ -56,6 +101,21 @@ export class SheetEditor {
     return this;
   }
 
+  // Adds a sheet after the existing ones. Cells take values, formulas and styles; for hyperlinks,
+  // notes and sheet options, write the workbook with SheetWriter.
+  addSheet(sheetName: string, rows: Row[]): this {
+    validateSheetName(sheetName, this.additions.keys());
+    this.additions.set(sheetName, rows);
+    return this;
+  }
+
+  // Removes a sheet. Names scoped to it go; other defined names that point at it become #REF!.
+  // Formulas in other sheets that point at it are not rewritten.
+  deleteSheet(sheetName: string): this {
+    this.deletions.add(sheetName);
+    return this;
+  }
+
   edit(reader: RandomAccessReader): ReadableStream<Uint8Array> {
     const zipIn = new ZipRandomAccessParser(reader);
     const zipOut = new ZipStreamWriter();
@@ -68,7 +128,12 @@ export class SheetEditor {
         const readText = async (name: string) =>
           zipIn.has(name) ? this.readStreamToString(await zipIn.extractStream(name)) : '';
         const parts = await resolveWorkbookParts(readText);
+        // Parts rewritten whole, read back by later steps
+        const overlay = new Map<string, string>();
+        const read = async (path: string) => overlay.get(path) ?? readText(path);
+        const written = new Set<string>();
         const pathOf = (sheetName: string) => {
+          if (this.deletions.has(sheetName)) throw new Error(`Sheet "${sheetName}" is being deleted.`);
           const path = parts.sheets.get(sheetName);
           if (!path || !zipIn.has(path)) throw new Error(`Sheet "${sheetName}" not found in workbook.`);
           return path;
@@ -76,18 +141,48 @@ export class SheetEditor {
 
         const appendByPath = new Map<string, Row[]>();
         for (const [sheetName, mod] of this.modifications) appendByPath.set(pathOf(sheetName), mod.rows);
-        const editsByPath = new Map<string, Map<number, Map<number, CellEdit>>>();
+        const editsByPath = new Map<string, EditedRows>();
         for (const [sheetName, rows] of this.cellEdits) editsByPath.set(pathOf(sheetName), rows);
 
+        for (const sheetName of this.deletions) await removeSheet(sheetName, parts, read, overlay, written);
+        const added = new Map<string, EditedRows>();
+        for (const [sheetName, rows] of this.additions) {
+          const free = (path: string) => !zipIn.has(path) && !added.has(path);
+          added.set(await insertSheet(sheetName, parts, read, overlay, free), rowsToEdits(sheetName, rows));
+        }
+
         // Edited cells invalidate cached formula results
-        const written = new Set<string>();
-        if (editsByPath.size) {
-          const { replace, drop } = await recalcOnOpen(readText, parts);
-          for (const [path, xml] of replace) {
-            await zipOut.addFile(path, new Response(xml).body!);
-            written.add(path);
-          }
+        if (editsByPath.size || added.size || this.deletions.size) {
+          const { replace, drop } = await recalcOnOpen(read, parts, await read(parts.workbookPath));
+          for (const [path, xml] of replace) overlay.set(path, xml);
           for (const path of drop) written.add(path);
+        }
+
+        // Styles gain the formats of restyled cells as the sheets stream, so they are written last
+        let patcher: StylePatcher | undefined;
+        const styled = [...editsByPath.values(), ...added.values()]
+          .some(rows => [...rows.values()].some(cells => [...cells.values()].some(e => styleOf(e))));
+        if (styled) {
+          if (!parts.styles) throw new Error('Workbook has no styles part.');
+          patcher = new StylePatcher(await read(parts.styles));
+          written.add(parts.styles);
+        }
+
+        for (const [path, xml] of overlay) {
+          if (written.has(path)) continue;
+          await zipOut.addFile(path, new Response(xml).body!);
+          written.add(path);
+        }
+        const decode = (bytes: ReadableStream<Uint8Array>) => bytes.pipeThrough(new TextDecoderStream() as any as TransformStream<Uint8Array, string>);
+        const encode = (text: ReadableStream<string>) => text.pipeThrough(new TextEncoderStream() as any as TransformStream<string, Uint8Array>);
+        if (added.size) {
+          // A new sheet uses the workbook's namespace (Transitional or Strict)
+          const root = /<((?:\w+:)?)workbook\b[^>]*>/.exec(await read(parts.workbookPath));
+          const ns = (root && attr(root[0], root[1] ? `xmlns:${root[1].slice(0, -1)}` : 'xmlns')) ?? 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+          const empty = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="${ns}"><sheetData/></worksheet>`;
+          for (const [path, edits] of added) {
+            await zipOut.addFile(path, encode(decode(new Response(empty).body!).pipeThrough(this.createEditTransform(edits, patcher))));
+          }
         }
 
         for (const filename of zipIn.getFiles()) {
@@ -95,11 +190,10 @@ export class SheetEditor {
           const rows = appendByPath.get(filename);
           const edits = editsByPath.get(filename);
           if (rows || edits) {
-            let text = (await zipIn.extractStream(filename))
-              .pipeThrough(new TextDecoderStream() as any as TransformStream<Uint8Array, string>);
-            if (edits) text = text.pipeThrough(this.createEditTransform(edits));
+            let text = decode(await zipIn.extractStream(filename));
+            if (edits) text = text.pipeThrough(this.createEditTransform(edits, patcher));
             if (rows) text = text.pipeThrough(this.createInjectTransform(rows));
-            await zipOut.addFile(filename, text.pipeThrough(new TextEncoderStream() as any as TransformStream<string, Uint8Array>));
+            await zipOut.addFile(filename, encode(text));
           } else {
             // Untouched entries are copied without decompressing
             const record = zipIn.getRecord(filename);
@@ -107,6 +201,7 @@ export class SheetEditor {
               record.uncompressedSize, record.compressedSize, record.crc, record.compressionMethod);
           }
         }
+        if (patcher) await zipOut.addFile(parts.styles!, new Response(patcher.toXml()).body!);
         await zipOut.close();
       } catch (err) {
         zipOut.error(err);
@@ -118,7 +213,7 @@ export class SheetEditor {
 
   // Streams a worksheet, rewriting edited cells as their rows pass by and adding rows and cells
   // that did not exist. Only one row at a time is held in memory.
-  private createEditTransform(edits: Map<number, Map<number, CellEdit>>): TransformStream<string, string> {
+  private createEditTransform(edits: EditedRows, patcher?: StylePatcher): TransformStream<string, string> {
     const pending = [...edits.keys()].sort((a, b) => a - b);
     let next = 0;
     let buffer = '';
@@ -128,9 +223,25 @@ export class SheetEditor {
     const sharedAnchors = new Map<string, { text: string; row: number; col: number }>();
     const brokenShared = new Set<string>();
 
+    // An edited cell; `existing` is the cell's current element, if any
+    const cellXml = (ref: string, edit: CellEdit, existing?: RegExpMatchArray): string => {
+      let attrs = existing ? existing[1].replace(/\sr="[^"]*"/, '') : '';
+      const style = styleOf(edit);
+      if (style) {
+        const base = parseInt(/\ss="(\d+)"/.exec(attrs)?.[1] ?? '0', 10);
+        attrs = `${attrs.replace(/\ss="[^"]*"/, '')} s="${patcher!.patch(base, style)}"`;
+      }
+      const content = contentOf(edit);
+      if (content === KEEP) {
+        return existing?.[2] !== undefined ? `<${p}c r="${ref}"${attrs}>${existing[2]}</${p}c>` : `<${p}c r="${ref}"${attrs}/>`;
+      }
+      // Keeps the style; drops the type and the metadata of rich values and dynamic arrays
+      return editedCell(p, ref, attrs.replace(/\s(?:t|vm|cm)="[^"]*"/g, ''), content);
+    };
+
     const newRow = (r: number) => {
       const cells = [...edits.get(r)!.entries()].sort((a, b) => a[0] - b[0])
-        .map(([c, e]) => editedCell(p, colLetter(c) + r, '', e)).join('');
+        .map(([c, e]) => cellXml(colLetter(c) + r, e)).join('');
       return `<${p}row r="${r}">${cells}</${p}row>`;
     };
     const rowsBefore = (limit: number) => {
@@ -157,10 +268,9 @@ export class SheetEditor {
         const anchor = si !== undefined && f && f[2] !== undefined;
         if (anchor) sharedAnchors.set(si!, { text: unescapeXml(f![2]), row: r, col });
         if (rowEdits?.has(col)) {
-          if (anchor) brokenShared.add(si!); // the group's formula text lived in this cell
-          // Keeps the style; drops the type and the metadata of rich values and dynamic arrays
-          const attrs = m[1].replace(/\s(?:r|t|vm|cm)="[^"]*"/g, '');
-          xml = editedCell(p, colLetter(col) + r, attrs, edit as CellEdit);
+          // the group's formula text lived in this cell
+          if (anchor && contentOf(edit as CellEdit) !== KEEP) brokenShared.add(si!);
+          xml = cellXml(colLetter(col) + r, edit as CellEdit, m);
           rowEdits.delete(col);
         } else if (si !== undefined && f && !anchor) {
           if (brokenShared.has(si)) {
@@ -174,7 +284,7 @@ export class SheetEditor {
         cells.push([col, xml]);
         col++;
       }
-      for (const [c, e] of rowEdits ?? []) cells.push([c, editedCell(p, colLetter(c) + r, '', e)]);
+      for (const [c, e] of rowEdits ?? []) cells.push([c, cellXml(colLetter(c) + r, e)]);
       if (!changed) return `${open}${inner}</${p}row>`;
       cells.sort((a, b) => a[0] - b[0]);
       return `${open.replace(/\sspans="[^"]*"/, '').replace(/\/>$/, '>')}${cells.map(c => c[1]).join('')}</${p}row>`;
@@ -302,4 +412,90 @@ export class SheetEditor {
     }
     return result;
   }
+}
+
+const sheetTags = (wb: string) => [...wb.matchAll(/<(?:\w+:)?sheet\b[^>]*>/g)].map(m => m[0]);
+const relTag = (rels: string, id: string) =>
+  new RegExp(`<(?:\\w+:)?Relationship\\b[^>]*?\\sId="${escapeRe(id)}"[^>]*/>`).exec(rels)?.[0];
+const overrideTag = (types: string, path: string) =>
+  new RegExp(`<(?:\\w+:)?Override\\b[^>]*?PartName="/${escapeRe(path)}"[^>]*/>`).exec(types)?.[0];
+
+async function removeSheet(name: string, parts: WorkbookParts, read: (path: string) => Promise<string>,
+  overlay: Map<string, string>, dropped: Set<string>) {
+  let wb = await read(parts.workbookPath);
+  const tags = sheetTags(wb);
+  const idx = tags.findIndex(t => attr(t, 'name') === name);
+  if (idx < 0) throw new Error(`Sheet "${name}" not found in workbook.`);
+  if (!tags.some((t, i) => i !== idx && !/\sstate="(?:hidden|veryHidden)"/.test(t))) {
+    throw new Error(`Cannot delete sheet "${name}": a workbook needs a visible sheet.`);
+  }
+  const rId = attr(tags[idx], 'r:id') ?? attr(tags[idx], '\\w+:id');
+  wb = wb.replace(tags[idx], '');
+
+  // Names scoped to the sheet go and later sheets' scopes shift down; references to it become #REF!
+  const quoted = new RegExp(`'${escapeRe(name.replace(/'/g, "''"))}'!`, 'gi');
+  const plain = /^[A-Za-z_\u00C0-\uFFFF][\w.\u00C0-\uFFFF]*$/.test(name)
+    ? new RegExp(`(^|[^\\w.'!])${escapeRe(name)}!`, 'gi') : undefined;
+  wb = wb.replace(/<((?:\w+:)?)definedName\b([^>]*)>([\s\S]*?)<\/\1definedName>/g, (whole, _p, attrs: string, text: string) => {
+    const local = attr(attrs, 'localSheetId');
+    if (local !== null) {
+      const n = parseInt(local, 10);
+      return n === idx ? '' : n > idx ? whole.replace(/\slocalSheetId="\d+"/, ` localSheetId="${n - 1}"`) : whole;
+    }
+    const formula = unescapeXml(text);
+    let mapped = formula.replace(quoted, '#REF!');
+    if (plain) mapped = mapped.replace(plain, '$1#REF!');
+    return mapped === formula ? whole : whole.replace(`>${text}<`, `>${escapeXml(mapped)}<`);
+  });
+  wb = wb.replace(/<(?:\w+:)?workbookView\b[^>]*>/g, view => view.replace(/\s(activeTab|firstSheet)="(\d+)"/g, (_m, a: string, v: string) => {
+    const n = parseInt(v, 10);
+    return ` ${a}="${n > idx ? n - 1 : Math.min(n, tags.length - 2)}"`;
+  }));
+  overlay.set(parts.workbookPath, wb);
+
+  const path = (await partRelationships(read, parts.workbookPath)).find(r => r.id === rId)?.path;
+  const relsPath = relsPathOf(parts.workbookPath);
+  const rels = await read(relsPath);
+  overlay.set(relsPath, rels.replace(relTag(rels, rId ?? '') ?? '', ''));
+  if (path) {
+    // The sheet's own drawings, notes and tables stay in the package, unreferenced
+    const types = await read('[Content_Types].xml');
+    overlay.set('[Content_Types].xml', types.replace(overrideTag(types, path) ?? '', ''));
+    dropped.add(path);
+    dropped.add(relsPathOf(path));
+  }
+}
+
+// Registers a new, empty worksheet part after the existing sheets; returns its path
+async function insertSheet(name: string, parts: WorkbookParts, read: (path: string) => Promise<string>,
+  overlay: Map<string, string>, free: (path: string) => boolean): Promise<string> {
+  let wb = await read(parts.workbookPath);
+  const tags = sheetTags(wb);
+  validateSheetName(name, tags.map(t => attr(t, 'name') ?? ''));
+  const dir = dirOf(parts.workbookPath);
+  let n = 1;
+  while (!free(`${dir}worksheets/sheet${n}.xml`)) n++;
+  const path = `${dir}worksheets/sheet${n}.xml`;
+
+  const relsPath = relsPathOf(parts.workbookPath);
+  let rels = await read(relsPath);
+  let k = 1;
+  while (relTag(rels, `rId${k}`)) k++;
+  // Strict OOXML files use other type URIs: copy them from an existing sheet
+  const sheetRel = (await partRelationships(read, parts.workbookPath)).find(r => r.type.endsWith('/worksheet'));
+  rels = rels.replace(/<\/((?:\w+:)?)Relationships>/, (close, p: string) =>
+    `<${p}Relationship Id="rId${k}" Type="${sheetRel?.type ?? WORKSHEET_TYPE}" Target="worksheets/sheet${n}.xml"/>${close}`);
+  overlay.set(relsPath, rels);
+
+  const sheetId = Math.max(0, ...tags.map(t => parseInt(attr(t, 'sheetId') ?? '0', 10))) + 1;
+  const rPrefix = /<(?:\w+:)?sheet\b[^>]*?\s(\w+):id="/.exec(wb)?.[1] ?? 'r';
+  wb = wb.replace(/<\/((?:\w+:)?)sheets>/, (close, p: string) =>
+    `<${p}sheet name="${escapeXml(name)}" sheetId="${sheetId}" ${rPrefix}:id="rId${k}"/>${close}`);
+  overlay.set(parts.workbookPath, wb);
+
+  const types = await read('[Content_Types].xml');
+  const contentType = sheetRel && /ContentType="([^"]*)"/.exec(overrideTag(types, sheetRel.path) ?? '')?.[1];
+  overlay.set('[Content_Types].xml', types.replace(/<\/((?:\w+:)?)Types>/, (close, p: string) =>
+    `<${p}Override PartName="/${path}" ContentType="${contentType ?? WORKSHEET_CONTENT}"/>${close}`));
+  return path;
 }

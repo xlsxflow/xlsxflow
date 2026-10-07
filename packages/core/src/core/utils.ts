@@ -42,7 +42,7 @@ export async function streamToCsv(parseResult: ParseResult): Promise<string> {
   return rows.join('\n');
 }
 
-function attr(tag: string, name: string): string | null {
+export function attr(tag: string, name: string): string | null {
   const m = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(tag);
   if (!m) return null;
   return (m[1] ?? m[2])
@@ -78,8 +78,8 @@ function parseRels(relsXml: string, baseDir: string): Relationship[] {
   return rels;
 }
 
-const dirOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
-const relsPathOf = (path: string) => `${dirOf(path)}_rels/${path.slice(path.lastIndexOf('/') + 1)}.rels`;
+export const dirOf = (path: string) => path.slice(0, path.lastIndexOf('/') + 1);
+export const relsPathOf = (path: string) => `${dirOf(path)}_rels/${path.slice(path.lastIndexOf('/') + 1)}.rels`;
 // Relationship types end the same way in Transitional and Strict OOXML
 const byType = (rels: Relationship[], suffix: string) => rels.find(r => !r.external && r.type.endsWith(suffix))?.path;
 
@@ -291,4 +291,14 @@ export async function recalcOnOpen(
       .replace(new RegExp(`<(?:\\w+:)?Override\\b[^>]*?PartName="/${escaped}"[^>]*/>`), ''));
   }
   return { replace, drop };
+}
+
+// Excel refuses to open a workbook that breaks these rules
+export function validateSheetName(name: string, existing: Iterable<string>): void {
+  if (!name || name.length > 31 || /[\\/?*:[\]]/.test(name) || name.startsWith("'") || name.endsWith("'")) {
+    throw new Error(`Invalid sheet name "${name}": 1-31 characters, none of \\ / ? * : [ ], and no leading or trailing apostrophe.`);
+  }
+  for (const other of existing) {
+    if (other.toLowerCase() === name.toLowerCase()) throw new Error(`Duplicate sheet name "${name}".`);
+  }
 }

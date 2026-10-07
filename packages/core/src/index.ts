@@ -1,5 +1,6 @@
 export { SheetReader, type ParseOptions, sheetToJson, streamToCsv, createBlobReader, createFileReader, type RandomAccessReader } from './core/index';
 export { SheetEditor, type CellEdit } from './core/editor';
+export { parseCsv, type CsvOptions } from './core/csv';
 export { SheetWriter, legacyPasswordHash, type WriterOptions } from './core/writer';
 export { createXmlStreamParser } from './core/xml-stream';
 export { parseWorksheet, type RowData, type SheetMetadata, type SheetComment } from './core/worksheet-parser';

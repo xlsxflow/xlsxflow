@@ -103,18 +103,37 @@ const blob = await new Response(writer.write()).blob();
 
 Rows can also be an `AsyncIterable<Row>`, so millions of rows can be generated lazily; the writer only pulls rows as fast as the output is consumed.
 
+### Converting CSV
+
+```typescript
+import { SheetWriter, parseCsv } from '@xlsxflow/core';
+
+// parseCsv streams rows from a string or a ReadableStream<Uint8Array>, e.g. file.stream()
+const xlsx = new SheetWriter().addSheet('Data', parseCsv(csvStream)).write();
+```
+
+Quoted fields can hold delimiters, line breaks and `""`. Unquoted numbers and `TRUE`/`FALSE` become numbers and booleans, and empty fields become empty cells; `{ convert: false }` keeps everything as text, and `{ delimiter: ';' }` sets the delimiter. Dates stay text, since CSV files do not say which date order they use.
+
 ### Editing an Existing File
 
 ```typescript
 import { SheetEditor, createBlobReader } from '@xlsxflow/core';
 
 const editor = new SheetEditor();
-editor.setCells('Sheet1', { B2: 42, C2: { formula: 'B2*2' }, D9: 'new cell', A3: null }); // null clears
+editor.setCells('Sheet1', {
+  B2: 42, C2: { formula: 'B2*2' }, D9: 'new cell', A3: null,       // null clears
+  A1: { style: { font: { bold: true }, fill: { type: 'solid', fgColor: 'FFFFFF00' } } }, // restyle, keep content
+  B3: { value: 7, style: { numFmt: '0.00' } },
+});
 editor.appendSheet('Sheet1', [['new', 'row']]); // appended after the last existing row
+editor.addSheet('Summary', [['Total', { value: null, formula: 'SUM(Sheet1!B:B)' }]]);
+editor.deleteSheet('Old');
 const edited = editor.edit(createBlobReader(existingBlob)); // ReadableStream<Uint8Array>
 ```
 
-Edited cells keep their style. The sheet streams through one row at a time, and every other part of the file is copied without being unpacked. Excel recalculates formulas when it opens the file. A shared formula whose first cell is overwritten is written out in full in the cells that used it. Changing styles of existing cells is not supported yet.
+Edited cells keep their style. A style change is merged into the cell's current format: font properties, border sides and alignment settings you name change and the rest stay, while a fill or number format replaces the old one. The sheet streams through one row at a time, and every other part of the file is copied without being unpacked. Excel recalculates formulas when it opens the file. A shared formula whose first cell is overwritten is written out in full in the cells that used it.
+
+`addSheet` takes values, formulas and styles; for hyperlinks, notes and sheet options, write the workbook with `SheetWriter`. `deleteSheet` removes names scoped to the sheet and turns other defined names that point at it into `#REF!`; formulas in other sheets that point at it are not rewritten. Inserting or deleting rows in an existing file is not supported.
 
 ## Styles, Formulas & Conditional Formats
 
@@ -158,6 +177,7 @@ writer.addSheet('Report', rows, {
   tabColor: 'FF00B050',
 });
 // Notes: [{ value: 'Q3', comment: { text: 'Restated', author: 'Ana' } }]
+// Formatted notes: comment: { text: [{ text: 'Ana:', font: { bold: true } }, { text: ' restated' }] }
 ```
 
 Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when values repeat, but the distinct strings stay in memory until the file is finished.
@@ -194,6 +214,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 ### Unreleased
 
 - **Corrected benchmarks:** the earlier ExcelJS write time (13.5 s) came from a cold first run; warm, it is 1.8 s. write-excel-file was listed as running out of memory, but the harness used its old API and never ran it. Failures are now reported as failures, not out-of-memory.
+- **New:** `SheetEditor` restyles existing cells (`setCells` with `style`), adds sheets (`addSheet`) and deletes them (`deleteSheet`); `parseCsv` streams CSV rows, which `SheetWriter.addSheet` turns into xlsx; notes take formatted text runs.
 - **New, closing ExcelJS gaps:** `SheetEditor.setCells` edits cells of existing files; cell notes on write and `getComments()` on read; conditional formats `cellIs`, `expression`, `top10`, `aboveAverage`, text rules, `duplicateValues`/`uniqueValues` and `iconSet`; Excel tables; sheet protection; page setup, margins, header/footer, print area and titles; row heights, hidden rows/columns and outline grouping; tab colour; validation operators and messages.
 - **Changed:** `[Content_Types].xml` is now written last in the ZIP, since streamed sheets decide which parts exist. Readers use the ZIP's central directory, so entry order does not matter.
 - **Renamed:** SheetForge is now XlsxFlow. Packages are `@xlsxflow/core` and `@xlsxflow/pro`, and `SheetForge.readFile` is `XlsxFlow.readFile`.

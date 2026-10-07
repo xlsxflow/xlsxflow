@@ -16,10 +16,30 @@ export function fontXml(font: CellFont, nameTag = 'name'): string {
   return xml;
 }
 
-function borderXml(b: CellBorder): string {
-  const side = (tag: string, s?: { style: string; color?: string }) =>
-    s ? `<${tag} style="${s.style}">${s.color ? `<color rgb="${escapeXml(s.color)}"/>` : ''}</${tag}>` : `<${tag}/>`;
+export const borderSideXml = (tag: string, s?: { style: string; color?: string }) =>
+  s ? `<${tag} style="${s.style}">${s.color ? `<color rgb="${escapeXml(s.color)}"/>` : ''}</${tag}>` : `<${tag}/>`;
+
+export function borderXml(b: CellBorder): string {
+  const side = borderSideXml;
   return `<border>${side('left', b.left)}${side('right', b.right)}${side('top', b.top)}${side('bottom', b.bottom)}<diagonal/></border>`;
+}
+
+export function fillXml(fill: CellFill | GradientFill): string {
+  if (fill.type === 'gradient') {
+    const stops = fill.stops.map(s => `<stop position="${s.position}"><color rgb="${escapeXml(s.color)}"/></stop>`).join('');
+    return `<fill><gradientFill degree="${fill.degree ?? 0}">${stops}</gradientFill></fill>`;
+  }
+  return `<fill><patternFill patternType="solid"><fgColor rgb="${escapeXml(fill.fgColor)}"/></patternFill></fill>`;
+}
+
+// Attributes of an <alignment> element
+export function alignmentAttrs(alignment: CellAlignment): Record<string, string> {
+  const attrs: Record<string, string> = {};
+  if (alignment.horizontal) attrs.horizontal = alignment.horizontal;
+  // OOXML has no "middle"; Excel repairs the file if it sees one
+  if (alignment.vertical) attrs.vertical = alignment.vertical === 'middle' ? 'center' : alignment.vertical;
+  if (alignment.wrapText) attrs.wrapText = '1';
+  return attrs;
 }
 
 // Registry of unique styles — maps to integer index for OOXML styleSheet
@@ -115,11 +135,7 @@ export class StyleEngine {
   }
 
   private buildAlignmentXml(alignment: CellAlignment): string {
-    const attrs: string[] = [];
-    if (alignment.horizontal) attrs.push(`horizontal="${alignment.horizontal}"`);
-    // OOXML has no "middle"; Excel repairs the file if it sees one
-    if (alignment.vertical) attrs.push(`vertical="${alignment.vertical === 'middle' ? 'center' : alignment.vertical}"`);
-    if (alignment.wrapText) attrs.push(`wrapText="1"`);
+    const attrs = Object.entries(alignmentAttrs(alignment)).map(([k, v]) => `${k}="${v}"`);
     return attrs.length ? `<alignment ${attrs.join(' ')}/>` : '';
   }
 
@@ -173,20 +189,7 @@ ${this.dxfs.size ? `<dxfs count="${this.dxfs.size}">${[...this.dxfs.keys()].map(
       '<fill><patternFill patternType="gray125"/></fill>',
     ];
 
-    for (const [key] of this.registry.fills) {
-      const fill: CellFill | GradientFill = JSON.parse(key);
-      if (fill.type === 'solid') {
-        fillEntries.push(
-          `<fill><patternFill patternType="solid"><fgColor rgb="${escapeXml(fill.fgColor)}"/></patternFill></fill>`
-        );
-      } else if (fill.type === 'gradient') {
-        const gf = fill as GradientFill;
-        const stops = gf.stops.map(s =>
-          `<stop position="${s.position}"><color rgb="${escapeXml(s.color)}"/></stop>`
-        ).join('');
-        fillEntries.push(`<fill><gradientFill degree="${gf.degree ?? 0}">${stops}</gradientFill></fill>`);
-      }
-    }
+    for (const [key] of this.registry.fills) fillEntries.push(fillXml(JSON.parse(key)));
 
     return `<fills count="${fillEntries.length}">${fillEntries.join('')}</fills>`;
   }

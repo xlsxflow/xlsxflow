@@ -137,7 +137,7 @@ export interface StyledCell {
 }
 
 export interface CellComment {
-  text: string;
+  text: string | RichTextRun[];
   author?: string;
 }
 
