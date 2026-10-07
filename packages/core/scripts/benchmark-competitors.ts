@@ -13,14 +13,19 @@ interface BenchResult {
   oom?: boolean;
 }
 
-const ROWS_FULL = 100_000;
-const ROWS_FALLBACK = 10_000;
+// BENCH_ROWS=1000000 runs 10M cells; a library that runs out of memory is retried on a tenth
+const ROWS_FULL = Number(process.env.BENCH_ROWS ?? 100_000);
+const ROWS_FALLBACK = ROWS_FULL / 10;
+const size = (rows: number) => `${rows.toLocaleString('en-US')} rows, ${(rows * COLS).toLocaleString('en-US')} cells`;
 const COLS = 10;
+// A library still writing after this long is stopped (BENCH_TIMEOUT_MIN)
+const TIMEOUT_MIN = Number(process.env.BENCH_TIMEOUT_MIN ?? 10);
 
 // BENCH_LIBS=xlsxflow,exceljs runs a subset
 const LIBRARIES = process.env.BENCH_LIBS ? process.env.BENCH_LIBS.split(',') : [
   'xlsxflow',
   'xlsx',
+  'xlsx-compressed',
   'exceljs',
   'excel4node',
   'write-excel-file',
@@ -75,7 +80,7 @@ async function run() {
     }
     out.end();
     await new Promise(r => out.on('finish', () => r()));
-  } else if (lib === 'xlsx') {
+  } else if (lib === 'xlsx' || lib === 'xlsx-compressed') {
     const XLSX = require('./competitors/node_modules/xlsx');
     const data = [];
     data.push(Array.from({length: 10}, (_, i) => \`Col\${i}\`));
@@ -83,7 +88,7 @@ async function run() {
     const ws = XLSX.utils.aoa_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
-    XLSX.writeFile(wb, filepath);
+    XLSX.writeFile(wb, filepath, { compression: lib === 'xlsx-compressed' });
   } else if (lib === 'exceljs') {
     const ExcelJS = require('./competitors/node_modules/exceljs');
     const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: filepath });
@@ -149,10 +154,10 @@ run().catch(e => {
 async function runWorker(lib: string, rows: number): Promise<BenchResult> {
   return new Promise((resolve) => {
     // Increase heap to 4GB to give competitors a fighting chance!
-    const p = spawn('node', ['--expose-gc', '--max-old-space-size=4096', WORKER_SCRIPT, lib, rows.toString()], {
+    const p = spawn(process.execPath, ['--expose-gc', '--max-old-space-size=4096', WORKER_SCRIPT, lib, rows.toString()], {
       cwd: SCRIPTS_DIR,
-      shell: true,
-      env: process.env
+      env: process.env,
+      timeout: TIMEOUT_MIN * 60_000
     });
     
     let out = '';
@@ -160,7 +165,11 @@ async function runWorker(lib: string, rows: number): Promise<BenchResult> {
     p.stdout.on('data', (d: any) => out += d.toString());
     p.stderr.on('data', (d: any) => err += d.toString());
 
-    p.on('close', (code: number | null) => {
+    p.on('close', (code: number | null, signal: string | null) => {
+      if (signal) {
+        resolve({ name: lib, rows, error: `Stopped after ${TIMEOUT_MIN} min` });
+        return;
+      }
       const oom = err.includes('FATAL ERROR') || err.includes('heap out of memory');
       if (code !== 0 || oom) {
         // Only a real out-of-memory crash is reported as OOM; other failures are errors
@@ -180,7 +189,7 @@ async function runWorker(lib: string, rows: number): Promise<BenchResult> {
 
 async function run() {
   console.log('================================================================');
-  console.log('  Library Benchmark Suite (1M Cells & 100k Cells)');
+  console.log(`  Library Benchmark Suite (${size(ROWS_FULL)})`);
   console.log('================================================================');
   
   await writeWorkerScript();
@@ -188,16 +197,16 @@ async function run() {
   const results: BenchResult[] = [];
 
   for (const lib of LIBRARIES) {
-    console.log(`Testing ${lib} (100,000 rows, 1M cells)...`);
+    console.log(`Testing ${lib} (${size(ROWS_FULL)})...`);
     let res = await runWorker(lib, ROWS_FULL);
     
     if (res.error && !res.oom) {
       console.log(`  -> ${res.error}`);
       results.push(res);
     } else if (res.oom) {
-      console.log(`  -> OOM crashed on 100k rows! Falling back to 10k rows...`);
+      console.log(`  -> out of memory; retrying on ${size(ROWS_FALLBACK)}...`);
       const fallback = await runWorker(lib, ROWS_FALLBACK);
-      fallback.error = '100k OOM (tested 10k)';
+      fallback.error = `OOM at ${ROWS_FULL.toLocaleString('en-US')} rows`;
       results.push(fallback);
     } else {
       console.log(`  -> Success: ${res.writeMs?.toFixed(0)} ms`);

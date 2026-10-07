@@ -18,7 +18,7 @@
     "json2xls": "^0.1.2",
     "msexcel-builder": "^0.0.2",
     "write-excel-file": "^4.1.1",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "xlsx-populate": "^1.21.0"
   }
 }

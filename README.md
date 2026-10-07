@@ -194,17 +194,31 @@ Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedSt
 
 ## 📊 Benchmarks
 
-Write benchmark: 100,000 rows × 10 numeric columns (1M cells). Each library ran in its own process on Node v25.8.2, and "Heap" is the growth in heap usage. Times are from one warm run; repeated runs of the top three varied by under 10%. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`; `BENCH_LIBS=xlsxflow,exceljs` runs a subset).
+Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 rows (10M cells). Each library ran in its own process on Node v25.8.2 with a 4 GB heap limit, and "Heap" is the growth in heap usage. Times are from one run on a laptop with other apps open; runs on that machine varied by up to 2×, so treat differences under about 20% as a tie. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`). `BENCH_ROWS=1000000` runs 10M cells, `BENCH_LIBS=xlsxflow,exceljs` runs a subset, and a library still writing after `BENCH_TIMEOUT_MIN` minutes (default 10) is stopped.
+
+1M cells:
 
 | Library | Write Time | File Size | Heap |
 |---|---|---|---|
-| **XlsxFlow** | **1,685 ms** | **2.9 MB** | **+1 MB** |
-| ExcelJS 4.4 (streaming writer) | 1,797 ms | 3.0 MB | +9 MB |
-| SheetJS (`xlsx` 0.18.5 from npm) | 3,228 ms | 31.4 MB | +170 MB |
-| write-excel-file | 4,313 ms | 2.8 MB | +2 MB |
-| xlsx-populate | 7,500 ms | 2.9 MB | +114 MB |
-| excel4node | 12,087 ms | 3.1 MB | +205 MB |
+| **XlsxFlow** | **2,899 ms** | **2.9 MB** | **+2 MB** |
+| ExcelJS 4.4 (streaming writer) | 3,397 ms | 3.0 MB | +9 MB |
+| SheetJS 0.20.3, `compression: true` | 4,370 ms | 8.4 MB | +140 MB |
+| SheetJS 0.20.3, default options | 5,379 ms | 31.4 MB | +140 MB |
+| write-excel-file | 7,681 ms | 2.8 MB | +2 MB |
+| xlsx-populate | 9,852 ms | 2.9 MB | +114 MB |
+| excel4node | 14,973 ms | 3.1 MB | +205 MB |
 | msexcel-builder | fails to run (`Invalid character in name: fileVersion`) | | |
+
+10M cells:
+
+| Library | Write Time | File Size | Heap |
+|---|---|---|---|
+| **XlsxFlow** | **19.5 s** | **29.9 MB** | **+1 MB** |
+| ExcelJS 4.4 (streaming writer) | 22.0 s | 31.2 MB | +7 MB |
+| write-excel-file | 68.1 s | 29.3 MB | +1 MB |
+| xlsx-populate | 75.3 s | 30.0 MB | +1,118 MB |
+| SheetJS 0.20.3 (with and without compression) | not finished after 10 min | | |
+| excel4node | not finished after 10 min | | |
 
 Rows are pulled from an async generator. The writer only generates rows as fast as the output stream is consumed, so memory stays flat as row count grows.
 
@@ -215,7 +229,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 | **XlsxFlow** | **2,415 ms** | **92 MB** |
 | ExcelJS (streaming reader) | 3,010 ms | 267 MB |
 | ExcelJS | 4,227 ms | 660 MB |
-| SheetJS (`xlsx`) | 6,035 ms | 544 MB |
+| SheetJS (`xlsx` 0.18.5) | 6,035 ms | 544 MB |
 
 ---
 
