@@ -216,7 +216,7 @@ Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedSt
 
 ## Benchmarks
 
-Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 rows (10M cells). Each library ran in its own process on Node v25.8.2 with a 4 GB heap limit, and "Heap" is the growth in heap usage. Times are from one run on a laptop with other apps open; runs on that machine varied by up to 2×, so treat differences under about 20% as a tie. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`). `BENCH_ROWS=1000000` runs 10M cells, `BENCH_LIBS=xlsxflow,exceljs` runs a subset, and a library still writing after `BENCH_TIMEOUT_MIN` minutes (default 10) is stopped.
+Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 rows (10M cells). Each library ran in its own process on Node v25.8.2 with a 4 GB heap limit, and "Heap" is the growth in heap usage. Times are from one run on a laptop with other apps open; runs on that machine varied by up to 2×, so treat differences under about 20% as a tie. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`). `BENCH_ROWS=1000000` runs 10M cells, `BENCH_LIBS=xlsxflow,exceljs` runs a subset, and a library still writing after `BENCH_TIMEOUT_MIN` minutes (default 10) is stopped. The 10M runs for SheetJS and excel4node used a 30-minute limit.
 
 1M cells:
 
@@ -239,8 +239,8 @@ Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 ro
 | ExcelJS 4.4 (streaming writer) | 22.0 s | 31.2 MB | +7 MB |
 | write-excel-file | 68.1 s | 29.3 MB | +1 MB |
 | xlsx-populate | 75.3 s | 30.0 MB | +1,118 MB |
-| SheetJS 0.20.3 (with and without compression) | not finished after 10 min | | |
-| excel4node | not finished after 10 min | | |
+| SheetJS 0.20.3 (with and without compression) | not finished after 30 min | | |
+| excel4node | not finished after 30 min | | |
 
 Rows are pulled from an async generator. The writer only generates rows as fast as the output stream is consumed, so memory stays flat as row count grows.
 
