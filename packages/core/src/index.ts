@@ -1,9 +1,9 @@
 export { SheetReader, type ParseOptions, sheetToJson, streamToCsv, createBlobReader, createFileReader, type RandomAccessReader } from './core/index';
-export { SheetEditor } from './core/editor';
-export { SheetWriter, type WriterOptions } from './core/writer';
+export { SheetEditor, type CellEdit } from './core/editor';
+export { SheetWriter, legacyPasswordHash, type WriterOptions } from './core/writer';
 export { createXmlStreamParser } from './core/xml-stream';
-export { parseWorksheet, type RowData, type SheetMetadata } from './core/worksheet-parser';
-export type { CellValue, StyledCell, Row, CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, BorderSide, RichTextRun, SheetOptions, SheetImage, ConditionalFormat, DataValidation } from './core/types';
+export { parseWorksheet, type RowData, type SheetMetadata, type SheetComment } from './core/worksheet-parser';
+export type { CellValue, StyledCell, Row, CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, BorderSide, RichTextRun, SheetOptions, SheetImage, CellComment, HighlightStyle, ComparisonOperator, RowOptions, ColumnOptions, SheetProtection, PageSetup, TableOptions, ConditionalFormatRule, ConditionalFormat, DataValidation } from './core/types';
 export { StyleEngine } from './core/style-engine';
 export { FormulaEngine } from './core/formula-engine';
 export { ConditionalFormatter } from './core/conditional-formatter';
@@ -13,7 +13,7 @@ export { readSharedStrings } from './core/index';
 export { ZipRandomAccessParser } from './core/zip-random-access';
 export { ZipStreamWriter } from './core/zip-stream-writer';
 export {
-  resolveWorkbookParts, partRelationships, mapFormulaRefs, shiftFormula, dateToSerial,
+  resolveWorkbookParts, partRelationships, recalcOnOpen, mapFormulaRefs, shiftFormula, dateToSerial,
   colIndex, colLetter, encodeXString, decodeXString,
   type WorkbookParts, type Relationship, type RefMapper, type RefRole,
 } from './core/utils';

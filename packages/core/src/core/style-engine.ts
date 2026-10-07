@@ -1,4 +1,4 @@
-import { CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment } from './types';
+import { CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, HighlightStyle } from './types';
 
 function escapeXml(val: string): string {
   return val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -14,6 +14,12 @@ export function fontXml(font: CellFont, nameTag = 'name'): string {
   if (font.color) xml += `<color rgb="${escapeXml(font.color)}"/>`;
   if (font.name) xml += `<${nameTag} val="${escapeXml(font.name)}"/>`;
   return xml;
+}
+
+function borderXml(b: CellBorder): string {
+  const side = (tag: string, s?: { style: string; color?: string }) =>
+    s ? `<${tag} style="${s.style}">${s.color ? `<color rgb="${escapeXml(s.color)}"/>` : ''}</${tag}>` : `<${tag}/>`;
+  return `<border>${side('left', b.left)}${side('right', b.right)}${side('top', b.top)}${side('bottom', b.bottom)}<diagonal/></border>`;
 }
 
 // Registry of unique styles — maps to integer index for OOXML styleSheet
@@ -34,6 +40,31 @@ export class StyleEngine {
     cellXfs: [],
   };
   private xfIndex = new Map<string, number>();
+  // Differential formats used by conditional formatting, in dxfId order
+  private dxfs = new Map<string, number>();
+
+  // dxfId for a highlight style
+  registerDxf(style: HighlightStyle): number {
+    const key = JSON.stringify(style);
+    let id = this.dxfs.get(key);
+    if (id === undefined) {
+      this.dxfs.set(key, id = this.dxfs.size);
+      if (style.numFmt) this.registerNumFmt(style.numFmt);
+    }
+    return id;
+  }
+
+  private dxfXml(style: HighlightStyle): string {
+    let xml = style.font ? `<font>${fontXml(style.font)}</font>` : '';
+    if (style.numFmt) xml += `<numFmt numFmtId="${this.registerNumFmt(style.numFmt)}" formatCode="${escapeXml(style.numFmt)}"/>`;
+    if (style.fill?.type === 'solid') {
+      // A differential solid fill takes its colour from bgColor
+      const c = escapeXml(style.fill.fgColor);
+      xml += `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor rgb="${c}"/></patternFill></fill>`;
+    }
+    if (style.border) xml += borderXml(style.border);
+    return `<dxf>${xml}</dxf>`;
+  }
 
   registerStyle(style: CellStyle): number {
     const fontId = style.font ? this.registerFont(style.font) : 0;
@@ -111,6 +142,7 @@ ${bordersXml}
 ${cellXfsXml}
 </cellXfs>
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+${this.dxfs.size ? `<dxfs count="${this.dxfs.size}">${[...this.dxfs.keys()].map(k => this.dxfXml(JSON.parse(k))).join('')}</dxfs>` : ''}
 </styleSheet>`;
   }
 
@@ -160,19 +192,11 @@ ${cellXfsXml}
   }
 
   private buildBordersXml(): string {
-    const side = (tag: string, b?: { style: string; color?: string }) =>
-      b
-        ? `<${tag} style="${b.style}">${b.color ? `<color rgb="${escapeXml(b.color)}"/>` : ''}</${tag}>`
-        : `<${tag}/>`;
-
     const borderEntries: string[] = [
       '<border><left/><right/><top/><bottom/><diagonal/></border>'
     ];
 
-    for (const [key] of this.registry.borders) {
-      const b: CellBorder = JSON.parse(key);
-      borderEntries.push(`<border>${side('left', b.left)}${side('right', b.right)}${side('top', b.top)}${side('bottom', b.bottom)}<diagonal/></border>`);
-    }
+    for (const [key] of this.registry.borders) borderEntries.push(borderXml(JSON.parse(key)));
 
     return `<borders count="${borderEntries.length}">${borderEntries.join('')}</borders>`;
   }

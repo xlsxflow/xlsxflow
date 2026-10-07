@@ -1,4 +1,4 @@
-import { ConditionalFormat, DataBarRule, ColorScaleRule } from './types';
+import { ConditionalFormat, DataBarRule, ColorScaleRule, ConditionalFormatRule, HighlightStyle } from './types';
 
 function escapeXml(val: string): string {
   return val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -7,18 +7,64 @@ function escapeXml(val: string): string {
 const color = (rgb: string) => `<color rgb="${escapeXml(rgb)}"/>`;
 const bound = (type: 'min' | 'max', value?: number) =>
   value === undefined ? `<cfvo type="${type}"/>` : `<cfvo type="num" val="${value}"/>`;
+const formula = (f: string | number) => `<formula>${escapeXml(String(f).replace(/^=/, ''))}</formula>`;
+// Excel string literal inside a formula
+const literal = (s: string) => `"${s.replace(/"/g, '""')}"`;
 
 export class ConditionalFormatter {
+  // `dxf` registers a highlight style and returns its dxfId
+  constructor(private dxf: (style: HighlightStyle) => number = () => 0) {}
+
   // Priorities must be unique within a sheet: rule i gets priority i + 1
   toXml(formats: ConditionalFormat[]): string {
     return formats.map((cf, i) => {
-      const rule = cf.rule;
-      let body = '';
-      if (rule.type === 'dataBar') body = this.buildDataBar(rule);
-      else if (rule.type === 'colorScale') body = this.buildColorScale(rule);
-      if (!body) return '';
-      return `<conditionalFormatting sqref="${escapeXml(cf.range)}"><cfRule type="${rule.type}" priority="${i + 1}">${body}</cfRule></conditionalFormatting>`;
+      // The first cell of the first area: relative formulas are written for it
+      const topLeft = cf.range.split(/[\s:]/)[0].replace(/\$/g, '');
+      const rule = this.ruleXml(cf.rule, i + 1, topLeft);
+      return `<conditionalFormatting sqref="${escapeXml(cf.range)}">${rule}</conditionalFormatting>`;
     }).join('\n');
+  }
+
+  private ruleXml(rule: ConditionalFormatRule, priority: number, cell: string): string {
+    const head = (type: string, extra = '') => {
+      const dxf = 'style' in rule ? ` dxfId="${this.dxf(rule.style)}"` : '';
+      return `<cfRule type="${type}"${dxf} priority="${priority}"${extra}>`;
+    };
+    switch (rule.type) {
+      case 'dataBar': return `${head('dataBar')}${this.buildDataBar(rule)}</cfRule>`;
+      case 'colorScale': return `${head('colorScale')}${this.buildColorScale(rule)}</cfRule>`;
+      case 'cellIs':
+        return `${head('cellIs', ` operator="${rule.operator}"`)}${rule.formulae.map(formula).join('')}</cfRule>`;
+      case 'expression': return `${head('expression')}${formula(rule.formula)}</cfRule>`;
+      case 'top10':
+        return `${head('top10', `${rule.percent ? ' percent="1"' : ''}${rule.bottom ? ' bottom="1"' : ''} rank="${rule.rank}"`)}</cfRule>`;
+      case 'aboveAverage': return `${head('aboveAverage', rule.below ? ' aboveAverage="0"' : '')}</cfRule>`;
+      case 'duplicateValues':
+      case 'uniqueValues': return `${head(rule.type)}</cfRule>`;
+      case 'containsText':
+      case 'notContainsText':
+      case 'beginsWith':
+      case 'endsWith': {
+        // Excel stores the test as a formula too, and evaluates that one
+        const t = literal(rule.text);
+        const test = {
+          containsText: `NOT(ISERROR(SEARCH(${t},${cell})))`,
+          notContainsText: `ISERROR(SEARCH(${t},${cell}))`,
+          beginsWith: `LEFT(${cell},LEN(${t}))=${t}`,
+          endsWith: `RIGHT(${cell},LEN(${t}))=${t}`,
+        }[rule.type];
+        const operator = rule.type === 'notContainsText' ? 'notContains' : rule.type;
+        return `${head(rule.type, ` operator="${operator}" text="${escapeXml(rule.text)}"`)}${formula(test)}</cfRule>`;
+      }
+      case 'iconSet': {
+        const n = parseInt(rule.iconSet, 10);
+        const cfvos = Array.from({ length: n }, (_, k) => `<cfvo type="percent" val="${Math.round(k * 100 / n)}"/>`).join('');
+        const attrs = `${rule.reverse ? ' reverse="1"' : ''}${rule.showValue === false ? ' showValue="0"' : ''}`;
+        return `${head('iconSet')}<iconSet iconSet="${rule.iconSet}"${attrs}>${cfvos}</iconSet></cfRule>`;
+      }
+      default:
+        throw new Error(`Unknown conditional format type "${(rule as { type: string }).type}".`);
+    }
   }
 
   private buildDataBar(rule: DataBarRule): string {

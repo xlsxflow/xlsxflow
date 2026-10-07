@@ -1,8 +1,8 @@
 import { RandomAccessReader } from './random-access';
 import { ZipRandomAccessParser } from './zip-random-access';
 import { createXmlBatchParser, XmlToken } from './xml-stream';
-import { parseWorksheet, ParseResult, RichTextCollector } from './worksheet-parser';
-import { resolveWorkbookParts, hyperlinkTargets, decodeXString, isDateFormatCode } from './utils';
+import { parseWorksheet, parseComments, ParseResult, RichTextCollector } from './worksheet-parser';
+import { resolveWorkbookParts, partRelationships, hyperlinkTargets, decodeXString, isDateFormatCode } from './utils';
 import { parseThemeColors, colorResolver, applyFontElement, ColorResolver } from './style-reader';
 import { readSheetImages } from './image';
 import type { CellStyle, CellFont, CellFill, GradientFill, CellBorder, BorderSide, CellAlignment, RichTextRun } from './types';
@@ -110,6 +110,10 @@ export class SheetReader {
       richText: options?.richText ? color : undefined,
       sharedRichText,
       hyperlinkTargets: await hyperlinkTargets(readText, worksheetZipPath),
+      comments: async () => {
+        const rel = (await partRelationships(readText, worksheetZipPath)).find(r => !r.external && r.type.endsWith('/comments'));
+        return rel ? parseComments(await readText(rel.path)) : [];
+      },
       images: () => readSheetImages(readText, async path => zip.has(path)
         ? new Uint8Array(await new Response(limit(await zip.extractStream(path))).arrayBuffer()) : undefined, worksheetZipPath),
     });

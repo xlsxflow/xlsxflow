@@ -1,9 +1,9 @@
-import { Row, StyledCell, CellValue, SheetOptions, SheetImage } from './types';
+import { Row, StyledCell, CellValue, SheetOptions, SheetImage, CellComment, TableOptions, PageSetup } from './types';
 import { StyleEngine, fontXml } from './style-engine';
 import { ConditionalFormatter } from './conditional-formatter';
 import { FormulaEngine } from './formula-engine';
 import { ZipStreamWriter } from './zip-stream-writer';
-import { encodeXString, colLetter, dateToSerial } from './utils';
+import { encodeXString, colLetter, colIndex, dateToSerial } from './utils';
 import { imageInfo, drawingXml, type ImageInfo } from './image';
 
 function escapeXml(val: string): string {
@@ -30,6 +30,27 @@ function stringXml(s: string): string {
   return /^\s|\s$/.test(s) ? `<t xml:space="preserve">${text}</t>` : `<t>${text}</t>`;
 }
 
+const REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+// What a sheet produced while streaming, for the parts written after it
+interface SheetParts {
+  links: string[];                                         // external hyperlink targets, rId1..n
+  comments: { ref: string; row: number; col: number; comment: CellComment }[];
+}
+
+// Excel's legacy 16-bit sheet password hash (ECMA-376 Part 4, 14.7.1)
+export function legacyPasswordHash(password: string): string {
+  let hash = 0;
+  for (let i = password.length - 1; i >= 0; i--) {
+    hash = ((hash >> 14) & 1) | ((hash << 1) & 0x7fff);
+    hash ^= password.charCodeAt(i);
+  }
+  hash = ((hash >> 14) & 1) | ((hash << 1) & 0x7fff);
+  return (hash ^ password.length ^ 0xce4b).toString(16).toUpperCase();
+}
+
+const quoteSheet = (name: string) => `'${name.replace(/'/g, "''")}'`;
+
 export interface WriterOptions {
   // Store strings once in xl/sharedStrings.xml instead of inline. Smaller files when values repeat,
   // but every distinct string is kept in memory until the workbook is finished.
@@ -40,7 +61,7 @@ export interface WriterOptions {
 // Uses a pure JS ZIP writer (no dependencies) to pack OOXML parts.
 export class SheetWriter {
   private styleEngine = new StyleEngine();
-  private conditionalFormatter = new ConditionalFormatter();
+  private conditionalFormatter = new ConditionalFormatter(style => this.styleEngine.registerDxf(style));
   private formulaEngine = new FormulaEngine();
   private sheets: { name: string; rows: Row[] | AsyncIterable<Row>; options: SheetOptions }[] = [];
   private sharedStrings = new Map<string, number>();
@@ -77,11 +98,12 @@ export class SheetWriter {
       this.media.set(img.data, { path: `media/image${this.media.size + 1}.${info.ext}`, bytes, info });
     }
     let drawings = 0;
+    const commentSheets: number[] = [];
 
     // Push the build process to background so we can return the stream immediately
     (async () => {
       try {
-        await this.streamString(zip, '[Content_Types].xml', this.buildContentTypes());
+        const tables = this.planTables();
         await this.streamString(zip, '_rels/.rels', this.buildRootRels());
         await this.streamString(zip, 'xl/workbook.xml', this.buildWorkbookXml());
         await this.streamString(zip, 'xl/_rels/workbook.xml.rels', this.buildWorkbookRels());
@@ -97,13 +119,23 @@ export class SheetWriter {
             })));
             if (sheet.options.autoFitColumns) this.applyAutoFit(sheet.rows, sheet.options);
           }
-          const links: string[] = [];
-          await zip.addFile(`xl/worksheets/sheet${i + 1}.xml`, this.buildWorksheetXmlStream(sheet.rows, sheet.options, links));
+          const parts: SheetParts = { links: [], comments: [] };
+          const sheetTables = tables.filter(t => t.sheet === i);
+          await zip.addFile(`xl/worksheets/sheet${i + 1}.xml`, this.buildWorksheetXmlStream(sheet.rows, sheet.options, parts, sheetTables.length));
           const images = sheet.options.images ?? [];
           const drawing = images.length ? ++drawings : 0;
-          if (links.length || drawing) await this.streamString(zip, `xl/worksheets/_rels/sheet${i + 1}.xml.rels`, this.buildSheetRels(links, drawing));
+          const rels = this.buildSheetRels(parts.links, drawing, parts.comments.length ? i + 1 : 0, sheetTables.map(t => t.id));
+          if (rels) await this.streamString(zip, `xl/worksheets/_rels/sheet${i + 1}.xml.rels`, rels);
           if (drawing) await this.writeDrawing(zip, drawing, images);
+          if (parts.comments.length) {
+            commentSheets.push(i + 1);
+            await this.streamString(zip, `xl/comments${i + 1}.xml`, commentsXml(parts.comments));
+            await this.streamString(zip, `xl/drawings/vmlDrawing${i + 1}.vml`, vmlXml(parts.comments, i + 1));
+          }
+          for (const t of sheetTables) await this.streamString(zip, `xl/tables/table${t.id}.xml`, tableXml(t.table, t.id, t.columns));
         }
+        // Written last: whether a streamed sheet has comments is only known after streaming it
+        await this.streamString(zip, '[Content_Types].xml', this.buildContentTypes(drawings, commentSheets, tables.length));
 
         // styles.xml goes last: streamed (AsyncIterable) rows register styles while being written.
         // Entry order is irrelevant to readers, which use the central directory.
@@ -120,6 +152,40 @@ export class SheetWriter {
     })();
 
     return zip.stream;
+  }
+
+  // Tables get workbook-wide ids; their header names come from the options or the header row
+  private planTables(): { sheet: number; id: number; table: TableOptions; columns: string[] }[] {
+    const plan: { sheet: number; id: number; table: TableOptions; columns: string[] }[] = [];
+    const names = new Set<string>();
+    this.sheets.forEach((sheet, i) => {
+      for (const table of sheet.options.tables ?? []) {
+        if (!/^[A-Za-z_\\][A-Za-z0-9_.]*$/.test(table.name) || names.has(table.name.toLowerCase())) {
+          throw new Error(`Invalid or duplicate table name "${table.name}".`);
+        }
+        names.add(table.name.toLowerCase());
+        const m = /^([A-Za-z]{1,3})(\d+):([A-Za-z]{1,3})(\d+)$/.exec(table.ref.replace(/\$/g, ''));
+        if (!m) throw new Error(`Invalid table range "${table.ref}".`);
+        const first = colIndex(m[1]);
+        const width = colIndex(m[3]) - first + 1;
+        let columns = table.columns;
+        if (!columns) {
+          if (!Array.isArray(sheet.rows)) throw new Error(`Table "${table.name}": pass columns when rows are an AsyncIterable.`);
+          const header = sheet.rows[parseInt(m[2], 10) - 1] ?? [];
+          columns = Array.from({ length: width }, (_, k) => {
+            const cell = header[first + k];
+            const v = isStyledCell(cell) ? cell.value : cell;
+            return v == null ? '' : String(v);
+          });
+        }
+        if (columns.length !== width) throw new Error(`Table "${table.name}" has ${width} columns but ${columns.length} names.`);
+        if (columns.some(c => !c) || new Set(columns.map(c => c.toLowerCase())).size !== columns.length) {
+          throw new Error(`Table "${table.name}" needs unique, non-empty header names.`);
+        }
+        plan.push({ sheet: i, id: plan.length + 1, table, columns });
+      }
+    });
+    return plan;
   }
 
   private async writeDrawing(zip: ZipStreamWriter, n: number, images: SheetImage[]) {
@@ -166,9 +232,9 @@ export class SheetWriter {
   }
 
   // Pull-based so rows are only generated as fast as the ZIP consumer drains them.
-  private buildWorksheetXmlStream(rows: Row[] | AsyncIterable<Row>, options: SheetOptions, links: string[]): ReadableStream<Uint8Array> {
+  private buildWorksheetXmlStream(rows: Row[] | AsyncIterable<Row>, options: SheetOptions, parts: SheetParts, tables: number): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder();
-    const chunks = this.worksheetXmlChunks(rows, options, links);
+    const chunks = this.worksheetXmlChunks(rows, options, parts, tables);
     return new ReadableStream({
       async pull(controller) {
         const { done, value } = await chunks.next();
@@ -181,11 +247,40 @@ export class SheetWriter {
     });
   }
 
-  // External hyperlink targets are pushed onto `links` (their index + 1 is the relationship id)
-  private async *worksheetXmlChunks(rows: Row[] | AsyncIterable<Row>, options: SheetOptions, links: string[]): AsyncGenerator<string> {
+  // Hyperlink targets and comments are collected in `parts` for the parts written after the sheet
+  private async *worksheetXmlChunks(rows: Row[] | AsyncIterable<Row>, options: SheetOptions, parts: SheetParts, tables: number): AsyncGenerator<string> {
+    const links = parts.links;
     const hyperlinks: string[] = [];
-    const colWidths = options.columnWidths
-      ? options.columnWidths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('')
+    const colCount = Math.max(options.columnWidths?.length ?? 0, options.columns?.length ?? 0);
+    let colWidths = '';
+    for (let i = 0; i < colCount; i++) {
+      const c = options.columns?.[i] ?? {};
+      const width = c.width ?? options.columnWidths?.[i];
+      if (width === undefined && !c.hidden && !c.outlineLevel) continue;
+      colWidths += `<col min="${i + 1}" max="${i + 1}"${width !== undefined ? ` width="${width}" customWidth="1"` : ''}` +
+        `${c.hidden ? ' hidden="1"' : ''}${c.outlineLevel ? ` outlineLevel="${c.outlineLevel}"` : ''}/>`;
+    }
+    const rowOptions = Object.entries(options.rows ?? {}).map(([r, o]) => [parseInt(r, 10), o] as const).sort((a, b) => a[0] - b[0]);
+    const rowAttrs = new Map(rowOptions.map(([r, o]) =>
+      [r, `${o.height !== undefined ? ` ht="${o.height}" customHeight="1"` : ''}${o.hidden ? ' hidden="1"' : ''}${o.outlineLevel ? ` outlineLevel="${o.outlineLevel}"` : ''}`]));
+    let nextRowOption = 0;
+    // Rows that only exist for their options (height, hidden, outline) and hold no cells
+    const optionRowsBefore = (limit: number) => {
+      let xml = '';
+      for (; nextRowOption < rowOptions.length && rowOptions[nextRowOption][0] < limit; nextRowOption++) {
+        xml += `    <row r="${rowOptions[nextRowOption][0]}"${rowAttrs.get(rowOptions[nextRowOption][0])}/>\n`;
+      }
+      return xml;
+    };
+    const outlineRow = Math.max(0, ...rowOptions.map(([, o]) => o.outlineLevel ?? 0));
+    const outlineCol = Math.max(0, ...(options.columns ?? []).map(c => c?.outlineLevel ?? 0));
+    const page = options.pageSetup;
+    const fitToPage = page && (page.fitToWidth !== undefined || page.fitToHeight !== undefined);
+    const sheetPr = options.tabColor || fitToPage
+      ? `<sheetPr>${options.tabColor ? `<tabColor rgb="${escapeXml(options.tabColor)}"/>` : ''}${fitToPage ? '<pageSetUpPr fitToPage="1"/>' : ''}</sheetPr>`
+      : '';
+    const sheetFormatPr = outlineRow || outlineCol
+      ? `<sheetFormatPr defaultRowHeight="15"${outlineRow ? ` outlineLevelRow="${outlineRow}"` : ''}${outlineCol ? ` outlineLevelCol="${outlineCol}"` : ''}/>`
       : '';
 
     let sheetViews = '';
@@ -200,7 +295,7 @@ export class SheetWriter {
 
     let header = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`;
     header += `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n`;
-    header += `  ${sheetViews}\n`;
+    header += `  ${sheetPr}${sheetViews}${sheetFormatPr}\n`;
     header += `  ${colWidths ? `<cols>${colWidths}</cols>` : ''}\n`;
     header += `  <sheetData>\n`;
     yield header;
@@ -218,6 +313,8 @@ export class SheetWriter {
       if (done) break;
 
       const rowNum = ri + 1;
+      chunkStr += optionRowsBefore(rowNum);
+      if (rowOptions[nextRowOption]?.[0] === rowNum) nextRowOption++;
       const cellsXml = row.map((cell, ci) => {
         const colRef = colLetter(ci) + rowNum;
         const styledCell: StyledCell = isStyledCell(cell) ? cell : { value: cell };
@@ -229,6 +326,11 @@ export class SheetWriter {
         }
         const style = cellStyle ? this.styleEngine.registerStyle(cellStyle) : 0;
         const sAttr = style > 0 ? ` s="${style}"` : '';
+
+        if (styledCell.comment !== undefined) {
+          const comment = typeof styledCell.comment === 'string' ? { text: styledCell.comment } : styledCell.comment;
+          parts.comments.push({ ref: colRef, row: rowNum - 1, col: ci, comment });
+        }
 
         if (styledCell.hyperlink) {
           if (styledCell.hyperlink.startsWith('#')) {
@@ -280,7 +382,7 @@ export class SheetWriter {
         return `<c r="${colRef}"${sAttr}/>`;
       }).join('');
       
-      chunkStr += `    <row r="${rowNum}">${cellsXml}</row>\n`;
+      chunkStr += `    <row r="${rowNum}"${rowAttrs.get(rowNum) ?? ''}>${cellsXml}</row>\n`;
       ri++;
 
       // Flush every ~64KB of string data to keep O(1) memory while avoiding chunk overhead
@@ -290,11 +392,19 @@ export class SheetWriter {
       }
     }
     
+    chunkStr += optionRowsBefore(Infinity);
     if (chunkStr.length > 0) {
       yield chunkStr;
     }
 
     let footer = `  </sheetData>\n`;
+    if (options.protection) {
+      const p = options.protection === true ? {} : options.protection;
+      // In the file, an action set to 1 is locked; allowing it means writing 0
+      const allowed = (['formatCells', 'formatColumns', 'formatRows', 'insertRows', 'insertColumns', 'deleteRows', 'deleteColumns', 'sort', 'autoFilter'] as const)
+        .filter(k => p[k]).map(k => ` ${k}="0"`).join('');
+      footer += `  <sheetProtection${p.password ? ` password="${legacyPasswordHash(p.password)}"` : ''} sheet="1" objects="1" scenarios="1"${allowed}/>\n`;
+    }
 
     if (options.autoFilter) footer += `  <autoFilter ref="${escapeXml(options.autoFilter)}"/>\n`;
 
@@ -313,7 +423,13 @@ export class SheetWriter {
         if (dv.type) attr += ` type="${dv.type}"`;
         if (dv.allowBlank !== undefined) attr += ` allowBlank="${dv.allowBlank ? 1 : 0}"`;
         if (dv.showInputMessage !== undefined) attr += ` showInputMessage="${dv.showInputMessage ? 1 : 0}"`;
-        if (dv.showErrorMessage !== undefined) attr += ` showErrorMessage="${dv.showErrorMessage ? 1 : 0}"`;
+        if (dv.errorStyle) attr += ` errorStyle="${dv.errorStyle}"`;
+        if (dv.operator) attr += ` operator="${dv.operator}"`;
+        if (dv.showErrorMessage !== undefined || dv.error) attr += ` showErrorMessage="${dv.showErrorMessage ?? true ? 1 : 0}"`;
+        if (dv.prompt && dv.showInputMessage === undefined) attr += ' showInputMessage="1"';
+        for (const k of ['errorTitle', 'error', 'promptTitle', 'prompt'] as const) {
+          if (dv[k]) attr += ` ${k}="${escapeXml(dv[k]!)}"`;
+        }
         let inner = '';
         if (dv.formula1) inner += `<formula1>${escapeXml(dv.formula1)}</formula1>`;
         if (dv.formula2) inner += `<formula2>${escapeXml(dv.formula2)}</formula2>`;
@@ -323,7 +439,10 @@ export class SheetWriter {
     }
 
     if (hyperlinks.length) footer += `  <hyperlinks>${hyperlinks.join('')}</hyperlinks>\n`;
+    footer += pageSetupXml(page);
     if (options.images?.length) footer += `  <drawing r:id="rIdDrawing"/>\n`;
+    if (parts.comments.length) footer += `  <legacyDrawing r:id="rIdVml"/>\n`;
+    if (tables) footer += `  <tableParts count="${tables}">${Array.from({ length: tables }, (_, k) => `<tablePart r:id="rIdTable${k + 1}"/>`).join('')}</tableParts>\n`;
 
     footer += `</worksheet>`;
     yield footer;
@@ -337,11 +456,18 @@ export class SheetWriter {
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${this.sharedStringRefs}" uniqueCount="${this.sharedStrings.size}">${items}</sst>`;
   }
 
-  private buildSheetRels(links: string[], drawing: number): string {
+  // '' when the sheet has no relationships
+  private buildSheetRels(links: string[], drawing: number, comments: number, tableIds: number[]): string {
     let rels = links.map((target, i) =>
-      `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${escapeXml(target)}" TargetMode="External"/>`
+      `<Relationship Id="rId${i + 1}" Type="${REL}/hyperlink" Target="${escapeXml(target)}" TargetMode="External"/>`
     ).join('');
-    if (drawing) rels += `<Relationship Id="rIdDrawing" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawing}.xml"/>`;
+    if (drawing) rels += `<Relationship Id="rIdDrawing" Type="${REL}/drawing" Target="../drawings/drawing${drawing}.xml"/>`;
+    if (comments) {
+      rels += `<Relationship Id="rIdComments" Type="${REL}/comments" Target="../comments${comments}.xml"/>` +
+        `<Relationship Id="rIdVml" Type="${REL}/vmlDrawing" Target="../drawings/vmlDrawing${comments}.vml"/>`;
+    }
+    tableIds.forEach((id, k) => { rels += `<Relationship Id="rIdTable${k + 1}" Type="${REL}/table" Target="../tables/table${id}.xml"/>`; });
+    if (!rels) return '';
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
   }
@@ -354,7 +480,16 @@ export class SheetWriter {
     const filterNames = this.sheets.map((s, i) => s.options.autoFilter
       ? `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">${escapeXml(`'${s.name.replace(/'/g, "''")}'!${absoluteRef(s.options.autoFilter)}`)}</definedName>`
       : ''
-    ).join('');
+    ).join('') + this.sheets.map((s, i) => {
+      const page = s.options.pageSetup;
+      let names = '';
+      if (page?.printArea) names += `<definedName name="_xlnm.Print_Area" localSheetId="${i}">${escapeXml(`${quoteSheet(s.name)}!${absoluteRef(page.printArea)}`)}</definedName>`;
+      if (page?.printTitleRows) {
+        const rows = page.printTitleRows.replace(/\$/g, '').split(':').map(r => `$${r}`).join(':');
+        names += `<definedName name="_xlnm.Print_Titles" localSheetId="${i}">${escapeXml(`${quoteSheet(s.name)}!${rows.includes(':') ? rows : `${rows}:${rows}`}`)}</definedName>`;
+      }
+      return names;
+    }).join('');
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -388,14 +523,18 @@ export class SheetWriter {
 </Relationships>`;
   }
 
-  private buildContentTypes(): string {
+  private buildContentTypes(drawings: number, commentSheets: number[], tables: number): string {
     const sheetOverrides = this.sheets.map((_, i) => 
       `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
     ).join('\n  ');
     const exts = new Set([...this.media.values()].map(m => m.info.ext));
     const imageTypes = [...exts].map(e => `<Default Extension="${e}" ContentType="image/${e}"/>`).join('');
-    const drawingOverrides = this.sheets.filter(s => s.options.images?.length).map((_, i) =>
-      `<Override PartName="/xl/drawings/drawing${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join('');
+    const drawingOverrides = Array.from({ length: drawings }, (_, i) =>
+      `<Override PartName="/xl/drawings/drawing${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join('') +
+      commentSheets.map(n => `<Override PartName="/xl/comments${n}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>`).join('') +
+      Array.from({ length: tables }, (_, i) =>
+        `<Override PartName="/xl/tables/table${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml"/>`).join('') +
+      (commentSheets.length ? '<Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>' : '');
 
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -410,4 +549,59 @@ export class SheetWriter {
   }
 
 
+}
+
+function pageSetupXml(page?: PageSetup): string {
+  if (!page) return '';
+  let xml = '';
+  if (page.gridLines || page.horizontalCentered) {
+    xml += `  <printOptions${page.horizontalCentered ? ' horizontalCentered="1"' : ''}${page.gridLines ? ' gridLines="1"' : ''}/>\n`;
+  }
+  // Excel's "Normal" margins, in inches; all six are required
+  const m = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3, ...page.margins };
+  xml += `  <pageMargins left="${m.left}" right="${m.right}" top="${m.top}" bottom="${m.bottom}" header="${m.header}" footer="${m.footer}"/>\n`;
+  const attrs = [
+    page.paperSize !== undefined && `paperSize="${page.paperSize}"`,
+    page.scale !== undefined && `scale="${page.scale}"`,
+    page.fitToWidth !== undefined && `fitToWidth="${page.fitToWidth}"`,
+    page.fitToHeight !== undefined && `fitToHeight="${page.fitToHeight}"`,
+    page.orientation && `orientation="${page.orientation}"`,
+  ].filter(Boolean).join(' ');
+  if (attrs) xml += `  <pageSetup ${attrs}/>\n`;
+  if (page.header || page.footer) {
+    xml += `  <headerFooter>${page.header ? `<oddHeader>${escapeXml(page.header)}</oddHeader>` : ''}${page.footer ? `<oddFooter>${escapeXml(page.footer)}</oddFooter>` : ''}</headerFooter>\n`;
+  }
+  return xml;
+}
+
+function commentsXml(comments: SheetParts['comments']): string {
+  const authors = [...new Set(comments.map(c => c.comment.author ?? ''))];
+  const list = comments.map(c => `<comment ref="${c.ref}" authorId="${authors.indexOf(c.comment.author ?? '')}"><text><r>${stringXml(c.comment.text)}</r></text></comment>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors>${authors.map(a => `<author>${escapeXml(a)}</author>`).join('')}</authors><commentList>${list}</commentList></comments>`;
+}
+
+// The legacy VML shapes Excel needs to show the note boxes (hidden until the cell is hovered)
+function vmlXml(comments: SheetParts['comments'], sheet: number): string {
+  const shapes = comments.map((c, i) =>
+    `<v:shape id="_x0000_s${sheet * 1024 + i + 1}" type="#_x0000_t202" style="position:absolute;margin-left:59.25pt;margin-top:1.5pt;width:108pt;height:59.25pt;z-index:${i + 1};visibility:hidden" fillcolor="#ffffe1" o:insetmode="auto">` +
+    `<v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>` +
+    `<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"></div></v:textbox>` +
+    `<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/>` +
+    `<x:Anchor>${c.col + 1}, 15, ${c.row}, 10, ${c.col + 3}, 15, ${c.row + 4}, 4</x:Anchor><x:AutoFill>False</x:AutoFill>` +
+    `<x:Row>${c.row}</x:Row><x:Column>${c.col}</x:Column></x:ClientData></v:shape>`).join('');
+  return `<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">` +
+    `<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="${sheet}"/></o:shapelayout>` +
+    `<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>` +
+    `${shapes}</xml>`;
+}
+
+function tableXml(table: TableOptions, id: number, columns: string[]): string {
+  const ref = table.ref.replace(/\$/g, '');
+  const filter = table.autoFilter === false ? '' : `<autoFilter ref="${ref}"/>`;
+  const cols = columns.map((c, k) => `<tableColumn id="${k + 1}" name="${escapeXml(c)}"/>`).join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="${id}" name="${escapeXml(table.name)}" displayName="${escapeXml(table.name)}" ref="${ref}" totalsRowShown="0">` +
+    `${filter}<tableColumns count="${columns.length}">${cols}</tableColumns>` +
+    `<tableStyleInfo name="${escapeXml(table.style ?? 'TableStyleMedium2')}" showFirstColumn="0" showLastColumn="0" showRowStripes="${table.showRowStripes === false ? 0 : 1}" showColumnStripes="0"/></table>`;
 }

@@ -70,7 +70,7 @@ Dates come back as ISO-8601 strings. Opt in to more detail, each indexed like `r
 - `{ styles: true }` gives `row.styles`, as `CellStyle` objects (the same shape the writer takes). Theme and palette colours are resolved to ARGB.
 - `{ richText: true }` gives `row.richText`, the formatted runs of cells that have them. `row.cells` still holds the plain text.
 
-Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format. `await rows.getImages()` returns the sheet's pictures in the writer's `images` format too (bytes included, read on that call), so they can be written back unchanged. Charts and shapes are skipped.
+Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format. `await rows.getImages()` returns the sheet's pictures in the writer's `images` format too (bytes included, read on that call), so they can be written back unchanged. Charts and shapes are skipped. `await rows.getComments()` returns the sheet's notes as `{ ref, text, author? }`.
 
 Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB uncompressed each, to stop zip bombs. The streamed worksheet is uncapped. Change both with `maxUncompressedBytes` (`Infinity` disables).
 
@@ -103,15 +103,18 @@ const blob = await new Response(writer.write()).blob();
 
 Rows can also be an `AsyncIterable<Row>`, so millions of rows can be generated lazily; the writer only pulls rows as fast as the output is consumed.
 
-### Appending to an Existing File
+### Editing an Existing File
 
 ```typescript
 import { SheetEditor, createBlobReader } from '@xlsxflow/core';
 
 const editor = new SheetEditor();
+editor.setCells('Sheet1', { B2: 42, C2: { formula: 'B2*2' }, D9: 'new cell', A3: null }); // null clears
 editor.appendSheet('Sheet1', [['new', 'row']]); // appended after the last existing row
 const edited = editor.edit(createBlobReader(existingBlob)); // ReadableStream<Uint8Array>
 ```
+
+Edited cells keep their style. The sheet streams through one row at a time, and every other part of the file is copied without being unpacked. Excel recalculates formulas when it opens the file. A shared formula whose first cell is overwritten is written out in full in the cells that used it. Changing styles of existing cells is not supported yet.
 
 ## Styles, Formulas & Conditional Formats
 
@@ -135,6 +138,26 @@ writer.addSheet('Sales', [
     { data: chartJpeg, range: 'D4:H14', altText: 'Trend' }, // stretched over the cells
   ],
 });
+```
+
+More sheet options, matching what ExcelJS offers:
+
+```typescript
+writer.addSheet('Report', rows, {
+  conditionalFormats: [
+    { range: 'B2:B100', rule: { type: 'cellIs', operator: 'greaterThan', formulae: [1000], style: { fill: { type: 'solid', fgColor: 'FFFFC7CE' } } } },
+    { range: 'A2:A100', rule: { type: 'containsText', text: 'urgent', style: { font: { bold: true, color: 'FF9C0006' } } } },
+    { range: 'C2:C100', rule: { type: 'iconSet', iconSet: '3TrafficLights1' } }, // also expression, top10, aboveAverage, duplicateValues...
+  ],
+  dataValidations: [{ sqref: 'B2:B100', type: 'whole', operator: 'between', formula1: '0', formula2: '100', error: 'Use 0-100' }],
+  tables: [{ name: 'Sales', ref: 'A1:C100' }],  // header names come from row 1
+  rows: { 1: { height: 24 }, 5: { outlineLevel: 1, hidden: true } },
+  columns: [{ width: 30 }, { width: 12, outlineLevel: 1 }],
+  protection: { password: 'secret', sort: true },  // Excel's legacy hash: deters edits, is not encryption
+  pageSetup: { orientation: 'landscape', paperSize: 9, fitToWidth: 1, fitToHeight: 0, printArea: 'A1:C100', printTitleRows: '1', footer: '&CPage &P of &N' },
+  tabColor: 'FF00B050',
+});
+// Notes: [{ value: 'Q3', comment: { text: 'Restated', author: 'Ana' } }]
 ```
 
 Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when values repeat, but the distinct strings stay in memory until the file is finished.
@@ -171,6 +194,8 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 ### Unreleased
 
 - **Corrected benchmarks:** the earlier ExcelJS write time (13.5 s) came from a cold first run; warm, it is 1.8 s. write-excel-file was listed as running out of memory, but the harness used its old API and never ran it. Failures are now reported as failures, not out-of-memory.
+- **New, closing ExcelJS gaps:** `SheetEditor.setCells` edits cells of existing files; cell notes on write and `getComments()` on read; conditional formats `cellIs`, `expression`, `top10`, `aboveAverage`, text rules, `duplicateValues`/`uniqueValues` and `iconSet`; Excel tables; sheet protection; page setup, margins, header/footer, print area and titles; row heights, hidden rows/columns and outline grouping; tab colour; validation operators and messages.
+- **Changed:** `[Content_Types].xml` is now written last in the ZIP, since streamed sheets decide which parts exist. Readers use the ZIP's central directory, so entry order does not matter.
 - **Renamed:** SheetForge is now XlsxFlow. Packages are `@xlsxflow/core` and `@xlsxflow/pro`, and `SheetForge.readFile` is `XlsxFlow.readFile`.
 - **Fixed: reader dropped/corrupted cells at stream chunk boundaries** (the XML tokenizer discarded buffered characters between chunks). Large files from ExcelJS/SheetJS now read back exactly.
 - **Fixed: styles pointed at the wrong font/fill/border** (off-by-one against the default entries), and styles used by `AsyncIterable` rows were missing from `styles.xml`.

@@ -259,3 +259,36 @@ export function isDateFormatCode(code: string): boolean {
     .replace(/\[(?!(?:h+|m+|s+)\])[^\]]*\]/gi, '');   // keep elapsed-time [h] [mm] [ss]
   return /[ymdhs]/i.test(stripped) || /\[(?:h+|m+|s+)\]/i.test(stripped);
 }
+
+// After cells change, cached formula results are stale: mark the workbook for a full recalculation
+// on open, and drop the calculation chain, which lists formula cells by address (Excel reports a
+// broken file when a listed cell no longer holds a formula). Returns the parts to rewrite and the
+// parts to leave out of the package.
+export async function recalcOnOpen(
+  readText: (path: string) => Promise<string>,
+  parts: WorkbookParts,
+  workbookXml = parts.workbookXml,
+): Promise<{ replace: Map<string, string>; drop: Set<string> }> {
+  let wb = workbookXml;
+  if (/<(?:\w+:)?calcPr\b/.test(wb)) {
+    wb = wb.replace(/<((?:\w+:)?)calcPr\b([^>]*?)(\/?)>/, (_m, p: string, attrs: string, slash: string) =>
+      `<${p}calcPr${attrs.replace(/\sfullCalcOnLoad="[^"]*"/, '')} fullCalcOnLoad="1"${slash}>`);
+  } else {
+    // calcPr comes before these in CT_Workbook
+    const p = /<((?:\w+:)?)workbook\b/.exec(wb)?.[1] ?? '';
+    const at = wb.search(/<(?:\w+:)?(?:oleSize|customWorkbookViews|pivotCaches|smartTagPr|smartTagTypes|webPublishing|fileRecoveryPr|webPublishObjects|extLst)\b|<\/(?:\w+:)?workbook>/);
+    wb = wb.slice(0, at) + `<${p}calcPr fullCalcOnLoad="1"/>` + wb.slice(at);
+  }
+  const replace = new Map([[parts.workbookPath, wb]]);
+  const drop = new Set<string>();
+  const calcChain = (await partRelationships(readText, parts.workbookPath)).find(r => r.type.endsWith('/calcChain'))?.path;
+  if (calcChain) {
+    drop.add(calcChain);
+    const relsPath = relsPathOf(parts.workbookPath);
+    replace.set(relsPath, (await readText(relsPath)).replace(/<(?:\w+:)?Relationship\b[^>]*?Type="[^"]*\/calcChain"[^>]*\/>/, ''));
+    const escaped = calcChain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    replace.set('[Content_Types].xml', (await readText('[Content_Types].xml'))
+      .replace(new RegExp(`<(?:\\w+:)?Override\\b[^>]*?PartName="/${escaped}"[^>]*/>`), ''));
+  }
+  return { replace, drop };
+}

@@ -24,6 +24,35 @@ export function excelToIsoDate(serial: number, is1904: boolean = false): string 
   return new Date(epoch + days * 86400000 + timeMs).toISOString();
 }
 
+export interface SheetComment {
+  ref: string;
+  text: string;
+  author?: string;
+}
+
+// Notes from a comments part. Threaded comments (Excel 365) also write their text here.
+export function parseComments(xml: string): SheetComment[] {
+  const authors = [...xml.matchAll(/<(?:\w+:)?author>([\s\S]*?)<\/(?:\w+:)?author>|<(?:\w+:)?author\/>/g)].map(m => unescapeXml(m[1] ?? ''));
+  const out: SheetComment[] = [];
+  for (const m of xml.matchAll(/<(?:\w+:)?comment\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?comment>/g)) {
+    const ref = /\sref="([^"]*)"/.exec(m[1])?.[1];
+    if (!ref) continue;
+    const body = m[2].replace(/<(?:\w+:)?rPh\b[\s\S]*?<\/(?:\w+:)?rPh>/g, '');
+    let text = '';
+    for (const t of body.matchAll(/<(?:\w+:)?t\b[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g)) text += t[1];
+    const comment: SheetComment = { ref, text: decodeXString(unescapeXml(text)) };
+    const author = authors[parseInt(/\sauthorId="(\d+)"/.exec(m[1])?.[1] ?? '-1', 10)];
+    if (author) comment.author = author;
+    out.push(comment);
+  }
+  return out;
+}
+
+const unescapeXml = (s: string) =>
+  s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (m, hex, dec, name) =>
+    hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(parseInt(dec, 10))
+      : ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[name] ?? m);
+
 export interface SheetMetadata {
   mergedCells: string[];
   hiddenRows: number[];
@@ -91,13 +120,15 @@ export interface WorksheetOptions {
   sharedRichText?: Map<number, RichTextRun[]>;
   hyperlinkTargets?: Map<string, string>;  // relationship id -> URL
   images?: () => Promise<SheetImage[]>;
+  comments?: () => Promise<SheetComment[]>;
 }
 
 export class ParseResult implements AsyncIterable<RowData> {
   constructor(
     private generator: AsyncGenerator<RowData>,
     private metadataPromise: Promise<SheetMetadata>,
-    private images: () => Promise<SheetImage[]> = async () => []
+    private images: () => Promise<SheetImage[]> = async () => [],
+    private comments: () => Promise<SheetComment[]> = async () => []
   ) {}
 
   [Symbol.asyncIterator]() {
@@ -111,6 +142,11 @@ export class ParseResult implements AsyncIterable<RowData> {
   // The sheet's pictures, in the writer's `images` format. Image files are read on this call.
   getImages(): Promise<SheetImage[]> {
     return this.images();
+  }
+
+  // The sheet's notes (comments), in sheet order
+  getComments(): Promise<SheetComment[]> {
+    return this.comments();
   }
 }
 
@@ -352,5 +388,5 @@ export function parseWorksheet(
     }
   }
 
-  return new ParseResult(generateRows(), metadataPromise, options.images);
+  return new ParseResult(generateRows(), metadataPromise, options.images, options.comments);
 }
