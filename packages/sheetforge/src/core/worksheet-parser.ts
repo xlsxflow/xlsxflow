@@ -1,7 +1,7 @@
 import { XmlToken } from './xml-stream';
 import { decodeXString, colIndex, shiftFormula, MAX_COLUMNS } from './utils';
 import { applyFontElement, ColorResolver } from './style-reader';
-import type { CellStyle, RichTextRun } from './types';
+import type { CellStyle, RichTextRun, SheetImage } from './types';
 
 export type CellValue = string | number | boolean | null;
 
@@ -90,12 +90,14 @@ export interface WorksheetOptions {
   richText?: ColorResolver;                // set to report rich text runs
   sharedRichText?: Map<number, RichTextRun[]>;
   hyperlinkTargets?: Map<string, string>;  // relationship id -> URL
+  images?: () => Promise<SheetImage[]>;
 }
 
 export class ParseResult implements AsyncIterable<RowData> {
   constructor(
     private generator: AsyncGenerator<RowData>,
-    private metadataPromise: Promise<SheetMetadata>
+    private metadataPromise: Promise<SheetMetadata>,
+    private images: () => Promise<SheetImage[]> = async () => []
   ) {}
 
   [Symbol.asyncIterator]() {
@@ -104,6 +106,11 @@ export class ParseResult implements AsyncIterable<RowData> {
 
   async getMetadata(): Promise<SheetMetadata> {
     return this.metadataPromise;
+  }
+
+  // The sheet's pictures, in the writer's `images` format. Image files are read on this call.
+  getImages(): Promise<SheetImage[]> {
+    return this.images();
   }
 }
 
@@ -345,5 +352,5 @@ export function parseWorksheet(
     }
   }
 
-  return new ParseResult(generateRows(), metadataPromise);
+  return new ParseResult(generateRows(), metadataPromise, options.images);
 }

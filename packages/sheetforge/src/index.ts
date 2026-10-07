@@ -17,6 +17,7 @@ export {
   colIndex, colLetter, encodeXString, decodeXString,
   type WorkbookParts, type Relationship, type RefMapper, type RefRole,
 } from './core/utils';
+export { anchorXml, drawingPartXml, DRAWING_NS, type Placement } from './core/image';
 
 export const SheetForge = {
   async readFile(filePath: string, options?: import('./core/index').ParseOptions) {

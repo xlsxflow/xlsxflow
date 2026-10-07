@@ -70,7 +70,7 @@ Dates come back as ISO-8601 strings. Opt in to more detail, each indexed like `r
 - `{ styles: true }` gives `row.styles`, as `CellStyle` objects (the same shape the writer takes). Theme and palette colours are resolved to ARGB.
 - `{ richText: true }` gives `row.richText`, the formatted runs of cells that have them. `row.cells` still holds the plain text.
 
-Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format.
+Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format. `await rows.getImages()` returns the sheet's pictures in the writer's `images` format too (bytes included, read on that call), so they can be written back unchanged. Charts and shapes are skipped.
 
 Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB uncompressed each, to stop zip bombs. The streamed worksheet is uncapped. Change both with `maxUncompressedBytes` (`Infinity` disables).
 
@@ -192,7 +192,8 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
   - Time-only values are no longer a day off, and datetimes keep millisecond precision.
 - **New:** `Date` cell values, hyperlinks (URLs and in-workbook locations), `autoFilter`, and an opt-in shared string table on write. Reading can return formulas (`formulas: true`, shared formulas expanded) and styles (`styles: true`).
 - **New:** rich text runs on write (`richText`) and read (`richText: true`); hyperlinks read back via `getMetadata()`; theme and indexed colours (with tints, and the workbook's own palette) resolved to ARGB when reading styles.
-- **New:** embedded PNG/JPEG/GIF images (`images` sheet option), anchored to a cell at their own size or stretched over a range. Format and size come from the file header; data shared between sheets is stored once.
+- **New:** embedded PNG/JPEG/GIF images (`images` sheet option), anchored to a cell at their own size or stretched over a range. Format and size come from the file header; data shared between sheets is stored once. `getImages()` reads them back.
+- **Fixed:** `addSheet` accepted sheet names Excel refuses to open (over 31 characters, `\ / ? * : [ ]`, a leading or trailing apostrophe, or a duplicate name ignoring case). It now throws.
 - Low-level building blocks are exported for add-ons: the ZIP reader and writer, `resolveWorkbookParts`, `readSharedStrings`, and `mapFormulaRefs`/`shiftFormula` (A1 reference rewriting that understands sheet qualifiers).
 - The formula engine understands `$A$1` references and no longer logs to the console for formulas it cannot evaluate.
 - **New:** 1 GiB default size cap on in-memory parts when reading (zip-bomb guard).

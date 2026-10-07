@@ -1,5 +1,5 @@
 import type { SheetImage } from './types';
-import { colIndex } from './utils';
+import { colIndex, colLetter, partRelationships } from './utils';
 
 const EMU_PER_PX = 9525;
 
@@ -31,36 +31,102 @@ export function imageInfo(b: Uint8Array): ImageInfo {
   throw new Error('Unsupported image: only PNG, JPEG and GIF can be embedded.');
 }
 
+// The pictures of a worksheet's drawing, in the writer's SheetImage shape. Charts and shapes are
+// skipped. Pictures sharing a media file share one `data` array.
+// Offsets inside the anchor cell are ignored, and absoluteAnchor pictures are skipped
+export async function readSheetImages(
+  readText: (path: string) => Promise<string>,
+  readBytes: (path: string) => Promise<Uint8Array | undefined>,
+  sheetPath: string,
+): Promise<SheetImage[]> {
+  const images: SheetImage[] = [];
+  const media = new Map<string, Uint8Array | undefined>();
+  for (const rel of await partRelationships(readText, sheetPath)) {
+    if (rel.external || !rel.type.endsWith('/drawing')) continue;
+    const xml = await readText(rel.path);
+    const targets = new Map((await partRelationships(readText, rel.path)).filter(r => !r.external).map(r => [r.id, r.path]));
+    for (const [anchor, kind] of xml.matchAll(/<(?:\w+:)?(twoCellAnchor|oneCellAnchor)\b[\s\S]*?<\/(?:\w+:)?\1>/g)) {
+      const pic = /<(?:\w+:)?pic\b[\s\S]*?<\/(?:\w+:)?pic>/.exec(anchor)?.[0];
+      const embed = pic && /<(?:\w+:)?blip\b[^>]*?\s(?:\w+:)?embed="([^"]*)"/.exec(pic)?.[1];
+      const path = embed && targets.get(embed);
+      if (!path) continue;
+      if (!media.has(path)) media.set(path, await readBytes(path));
+      const data = media.get(path);
+      if (!data) continue;
+
+      const pos = (tag: string) => {
+        const m = new RegExp(`<(?:\\w+:)?${tag}>([\\s\\S]*?)</(?:\\w+:)?${tag}>`).exec(anchor)?.[1] ?? '';
+        const num = (name: string) => parseInt(new RegExp(`<(?:\\w+:)?${name}>(-?\\d+)<`).exec(m)?.[1] ?? '0', 10);
+        return { col: num('col'), row: num('row'), offset: num('colOff') + num('rowOff') };
+      };
+      const from = pos('from');
+      const at = colLetter(from.col) + (from.row + 1);
+      const descr = pic && /<(?:\w+:)?cNvPr\b[^>]*?\sdescr="([^"]*)"/.exec(pic)?.[1];
+      const altText = descr ? unescapeXml(descr) : undefined;
+      let image: SheetImage;
+      if (kind === 'twoCellAnchor') {
+        // `to` is the cell the far edge lands in; at offset 0 the picture ends on the cell before it
+        const to = pos('to');
+        const end = to.offset === 0 ? { col: Math.max(from.col, to.col - 1), row: Math.max(from.row, to.row - 1) } : to;
+        image = { data, range: `${at}:${colLetter(end.col)}${end.row + 1}` };
+      } else {
+        const ext = /<(?:\w+:)?ext\b[^>]*?\scx="(\d+)"[^>]*?\scy="(\d+)"/.exec(anchor);
+        image = ext ? { data, at, width: Math.round(+ext[1] / EMU_PER_PX), height: Math.round(+ext[2] / EMU_PER_PX) } : { data, at };
+      }
+      if (altText) image.altText = altText;
+      images.push(image);
+    }
+  }
+  return images;
+}
+
+const unescapeXml = (s: string) =>
+  s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (m, hex, dec, name) =>
+    hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(parseInt(dec, 10))
+      : ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[name] ?? m);
+
 const escapeXml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const cellPos = (ref: string) => {
   const m = /^\$?([A-Za-z]{1,3})\$?(\d+)$/.exec(ref.trim());
-  if (!m) throw new Error(`Invalid image cell "${ref}".`);
+  if (!m) throw new Error(`Invalid anchor cell "${ref}".`);
   return { col: colIndex(m[1]), row: parseInt(m[2], 10) - 1 };
 };
 const marker = (tag: string, { col, row }: { col: number; row: number }) =>
   `<xdr:${tag}><xdr:col>${col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:${tag}>`;
 
+// Where a drawing object goes: stretched over cells, or at a cell with a size in pixels
+export type Placement = { range: string } | { at: string; width?: number; height?: number };
+
+export const DRAWING_NS = 'xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ' +
+  'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+  'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+
+// One anchor (xdr: prefix) holding `body`. `natural` is the size used when the placement gives
+// none; a missing side keeps its aspect ratio. `attrs` lands on the anchor element, e.g. DRAWING_NS
+// when the anchor is added to a drawing that declares other prefixes.
+export function anchorXml(place: Placement, natural: { width: number; height: number }, body: string, attrs = ''): string {
+  if ('range' in place) {
+    const [from, to = from] = place.range.split(':');
+    const end = cellPos(to);
+    // The object fills the range: it ends at the far edge of the last cell
+    return `<xdr:twoCellAnchor editAs="oneCell"${attrs}>${marker('from', cellPos(from))}${marker('to', { col: end.col + 1, row: end.row + 1 })}${body}<xdr:clientData/></xdr:twoCellAnchor>`;
+  }
+  const { width: w, height: h } = natural;
+  const width = place.width ?? (place.height ? w * place.height / h : w);
+  const height = place.height ?? h * width / w;
+  return `<xdr:oneCellAnchor${attrs}>${marker('from', cellPos(place.at))}<xdr:ext cx="${Math.round(width * EMU_PER_PX)}" cy="${Math.round(height * EMU_PER_PX)}"/>${body}<xdr:clientData/></xdr:oneCellAnchor>`;
+}
+
+export const drawingPartXml = (anchors: string) =>
+  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr ${DRAWING_NS}>${anchors}</xdr:wsDr>`;
+
 // One drawing part per sheet; `rIds[i]` is the drawing relationship of images[i]'s media
 export function drawingXml(images: SheetImage[], infos: ImageInfo[], rIds: string[]): string {
-  const anchors = images.map((img, i) => {
-    const pic = `<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${i + 2}" name="Picture ${i + 1}"${img.altText ? ` descr="${escapeXml(img.altText)}"` : ''}/>` +
-      `<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>` +
-      `<xdr:blipFill><a:blip r:embed="${rIds[i]}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>` +
-      `<xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/>`;
-    if ('range' in img) {
-      const [from, to = from] = img.range.split(':');
-      const end = cellPos(to);
-      // The picture fills the range: it ends at the far edge of the last cell
-      return `<xdr:twoCellAnchor editAs="oneCell">${marker('from', cellPos(from))}${marker('to', { col: end.col + 1, row: end.row + 1 })}${pic}</xdr:twoCellAnchor>`;
-    }
-    // A missing side keeps the aspect ratio; neither given means the image's own size
-    const { width: w, height: h } = infos[i];
-    const width = img.width ?? (img.height ? w * img.height / h : w);
-    const height = img.height ?? h * width / w;
-    return `<xdr:oneCellAnchor>${marker('from', cellPos(img.at))}<xdr:ext cx="${Math.round(width * EMU_PER_PX)}" cy="${Math.round(height * EMU_PER_PX)}"/>${pic}</xdr:oneCellAnchor>`;
-  }).join('');
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">${anchors}</xdr:wsDr>`;
+  return drawingPartXml(images.map((img, i) => anchorXml(img, infos[i],
+    `<xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${i + 2}" name="Picture ${i + 1}"${img.altText ? ` descr="${escapeXml(img.altText)}"` : ''}/>` +
+    `<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>` +
+    `<xdr:blipFill><a:blip r:embed="${rIds[i]}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>` +
+    `<xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic>`)).join(''));
 }

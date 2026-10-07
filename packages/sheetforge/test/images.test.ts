@@ -4,6 +4,7 @@ import { SheetWriter } from '../src/core/writer';
 import { ZipRandomAccessParser } from '../src/core/zip-random-access';
 import { createBlobReader } from '../src/core/random-access';
 import { imageInfo } from '../src/core/image';
+import { SheetReader } from '../src/core/index';
 
 const fixture = (name: string) => new Uint8Array(readFileSync(new URL(`./fixtures/${name}`, import.meta.url)));
 const png = fixture('red-40x20.png');
@@ -64,5 +65,29 @@ describe('images', () => {
     for (const part of ['Extension="png"', 'Extension="jpeg"', 'Extension="gif"', '/xl/drawings/drawing1.xml', '/xl/drawings/drawing2.xml']) {
       expect(types).toContain(part);
     }
+  });
+
+  it('reads pictures back in the writer format', async () => {
+    const images = [
+      { data: png, at: 'B2', width: 40, height: 20 },
+      { data: jpg, range: 'D2:E6', altText: 'Blue & "tall"' },
+      { data: png, at: 'H10', width: 80, height: 40 },
+    ];
+    const w = new SheetWriter();
+    w.addSheet('Pics', [['x']], { images });
+    w.addSheet('None', [['y']]);
+    const blob = await new Response(w.write()).blob();
+
+    const read = await new SheetReader().parse(createBlobReader(blob), { sheetName: 'Pics' });
+    const back = await read.getImages();
+    expect(back).toEqual(images);
+    expect(back[0].data).toBe(back[2].data); // one media file, one array
+    expect(await (await new SheetReader().parse(createBlobReader(blob), { sheetName: 'None' })).getImages()).toEqual([]);
+  });
+
+  it('reads openpyxl pictures and skips charts', async () => {
+    const blob = new Blob([readFileSync(new URL('../../sheetforge-pro/test/fixtures/openpyxl-chart.xlsx', import.meta.url))]);
+    const back = await (await new SheetReader().parse(createBlobReader(blob))).getImages();
+    expect(back).toEqual([{ data: png, at: 'A5', width: 40, height: 20, altText: 'Picture' }]);
   });
 });
