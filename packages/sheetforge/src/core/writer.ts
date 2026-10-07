@@ -51,6 +51,11 @@ export class SheetWriter {
   constructor(private writerOptions: WriterOptions = {}) {}
 
   addSheet(name: string, rows: Row[] | AsyncIterable<Row>, options: SheetOptions = {}): this {
+    // Excel refuses to open a workbook that breaks these rules
+    if (!name || name.length > 31 || /[\\/?*:[\]]/.test(name) || name.startsWith("'") || name.endsWith("'")) {
+      throw new Error(`Invalid sheet name "${name}": 1-31 characters, none of \\ / ? * : [ ], and no leading or trailing apostrophe.`);
+    }
+    if (this.sheets.some(s => s.name.toLowerCase() === name.toLowerCase())) throw new Error(`Duplicate sheet name "${name}".`);
     this.sheets.push({ name, rows, options });
     return this;
   }

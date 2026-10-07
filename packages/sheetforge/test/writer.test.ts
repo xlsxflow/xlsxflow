@@ -25,6 +25,14 @@ async function streamToUint8Array(stream: ReadableStream<Uint8Array>): Promise<U
 }
 
 describe('SheetWriter', () => {
+  it('rejects sheet names Excel cannot open', () => {
+    for (const bad of ['', 'x'.repeat(32), 'a/b', 'a:b', 'a[1]', 'what?', "'quoted", "quoted'"]) {
+      expect(() => new SheetWriter().addSheet(bad, [])).toThrow(/Invalid sheet name/);
+    }
+    expect(() => new SheetWriter().addSheet('Data', []).addSheet('DATA', [])).toThrow(/Duplicate sheet name/);
+    expect(() => new SheetWriter().addSheet("Q1 Sales's", []).addSheet('x'.repeat(31), [])).not.toThrow();
+  });
+
   it('should generate a valid XLSX buffer with Deflate compression', async () => {
     const writer = new SheetWriter();
     const rows: Row[] = [
