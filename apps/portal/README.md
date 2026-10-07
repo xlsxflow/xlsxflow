@@ -1,36 +1,21 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# XlsxFlow portal
 
-## Getting Started
+Next.js site with a reader demo and the Pro licence key page. A buyer enters their Polar order ID, the server
+checks that the order is paid and is for the Pro product, and returns a key signed with Ed25519.
 
-First, run the development server:
+## Run
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`.env.local` needs:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Value |
+|---|---|
+| `POLAR_ACCESS_TOKEN` | Polar organisation access token with read access to orders |
+| `POLAR_PRODUCT_ID` | ID of the Pro product |
+| `POLAR_API_URL` | Optional. `https://sandbox-api.polar.sh/v1/orders` for a sandbox token; production otherwise |
+| `LICENSE_PRIVATE_KEY` | Base64 PKCS#8 DER Ed25519 key matching `PUBLIC_KEY` in `packages/pro/src/license.ts` |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Set the same variables in the deployment, with a production token and product ID.

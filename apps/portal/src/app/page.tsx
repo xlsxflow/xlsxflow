@@ -7,6 +7,9 @@ import type { Row } from "@xlsxflow/core";
 
 type CellValue = string | number | boolean | null;
 
+// 0 -> A, 25 -> Z, 26 -> AA
+const columnName = (i: number): string => (i >= 26 ? columnName(Math.floor(i / 26) - 1) : "") + String.fromCharCode(65 + (i % 26));
+
 export default function Home() {
   const [orderId, setOrderId] = useState("");
   const [license, setLicense] = useState<string | null>(null);
@@ -17,6 +20,7 @@ export default function Home() {
   const [headers, setHeaders] = useState<string[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
+  const [parseError, setParseError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -31,8 +35,8 @@ export default function Home() {
       } else {
         setLicenseError(result.error ?? "Unknown error");
       }
-    } catch (e: any) {
-      setLicenseError(e.message);
+    } catch (e) {
+      setLicenseError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsGenerating(false);
     }
@@ -54,6 +58,7 @@ export default function Home() {
     setFileName(file.name);
     setRows([]);
     setHeaders([]);
+    setParseError(null);
 
     try {
       const reader = new SheetReader();
@@ -72,8 +77,8 @@ export default function Home() {
         setHeaders(parsed[0].map((_, i) => `Column ${i + 1}`));
         setRows(parsed);
       }
-    } catch (e: any) {
-      console.error("Parse error:", e);
+    } catch (e) {
+      setParseError(e instanceof Error ? e.message : String(e));
     } finally {
       setIsParsing(false);
     }
@@ -97,9 +102,9 @@ export default function Home() {
       [{ value: 'Product', style: { font: { bold: true, color: 'FFFFFFFF' }, fill: { type: 'solid' as const, fgColor: 'FF1e3a5f' } } },
        { value: 'Revenue', style: { font: { bold: true, color: 'FFFFFFFF' }, fill: { type: 'solid' as const, fgColor: 'FF1e3a5f' } } },
        { value: 'Units', style: { font: { bold: true, color: 'FFFFFFFF' }, fill: { type: 'solid' as const, fgColor: 'FF1e3a5f' } } }],
-      ['XlsxFlow Core', 15000, 3000],
-      ['XlsxFlow Pro', 42000, 8400],
-      ['XlsxFlow Enterprise', 98000, 4900],
+      ['Desk lamp', 15000, 3000],
+      ['Office chair', 42000, 8400],
+      ['Standing desk', 98000, 4900],
       [{ value: 'Total', style: { font: { bold: true } } },
        { value: null, formula: '=SUM(B2:B4)' },
        { value: null, formula: '=SUM(C2:C4)' }],
@@ -136,7 +141,7 @@ export default function Home() {
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center font-black text-xl shadow-lg shadow-cyan-500/30">S</div>
+            <img src="/icon.svg" alt="" className="w-9 h-9" />
             <span className="text-xl font-bold tracking-tight">XlsxFlow <span className="text-cyan-400">Portal</span></span>
           </div>
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
@@ -156,14 +161,14 @@ export default function Home() {
         <div className="relative">
           <div className="inline-flex items-center gap-2 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-xs font-semibold px-3 py-1 rounded-full mb-6">
             <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"/>
-            Pro tier · $5 PPP · Zero-DB Activation
+            XlsxFlow Pro: $5, priced for your country
           </div>
           <h1 className="text-5xl md:text-6xl font-black tracking-tighter mb-4 bg-gradient-to-br from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-            The modern Excel engine<br/>for the web.
+            Read, write and edit xlsx<br/>as a stream.
           </h1>
           <p className="text-slate-400 text-lg max-w-2xl mx-auto">
-            Zero-dependency. 100% type-safe. Streams 100k+ rows with flat memory usage.
-            Native browser APIs only.
+            No dependencies. Runs in Node, browsers and edge runtimes. Memory stays flat
+            however many rows you stream.
           </p>
         </div>
       </section>
@@ -173,16 +178,15 @@ export default function Home() {
         {/* License Section */}
         <section id="license" className="flex flex-col gap-5">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-md bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 text-sm">🔐</div>
-            <h2 className="text-xl font-bold">Zero-DB License Activation</h2>
+            <h2 className="text-xl font-bold">Get your license key</h2>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-5">
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Polar.sh Order ID</label>
+              <label className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Order ID</label>
               <input type="text" id="order-id-input" value={orderId} onChange={e => setOrderId(e.target.value)}
                 className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 placeholder:text-slate-600 transition-all"
-                placeholder="ord_123456789" />
+                placeholder="The order ID on your Polar receipt" />
             </div>
 
             {licenseError && (
@@ -214,8 +218,7 @@ export default function Home() {
         {/* Playground Section */}
         <section id="playground" className="flex flex-col gap-5">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-md bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-sm">⚡</div>
-            <h2 className="text-xl font-bold">Interactive Playground</h2>
+            <h2 className="text-xl font-bold">Try the reader</h2>
           </div>
 
           {/* Drop Zone */}
@@ -238,7 +241,7 @@ export default function Home() {
             </div>
             <div>
               <p className="font-semibold text-slate-200">Drop a .xlsx file here</p>
-              <p className="text-slate-500 text-sm mt-1">Or click to browse. Streams 100k+ rows with flat memory.</p>
+              <p className="text-slate-500 text-sm mt-1">Or click to browse. The file is read in your browser and never uploaded.</p>
             </div>
             {isParsing && (
               <div className="flex items-center gap-2 text-cyan-400 text-sm font-medium">
@@ -247,6 +250,12 @@ export default function Home() {
               </div>
             )}
           </div>
+
+          {parseError && (
+            <div className="text-red-400 text-xs bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
+              Could not read {fileName}: {parseError}
+            </div>
+          )}
 
           {/* Data Grid */}
           {rows.length > 0 && (
@@ -261,7 +270,7 @@ export default function Home() {
                     <tr>
                       {rows[0]?.map((_, i) => (
                         <th key={i} className="px-3 py-2 text-left text-slate-400 font-semibold border-b border-slate-800 whitespace-nowrap">
-                          {String.fromCharCode(65 + i)}
+                          {columnName(i)}
                         </th>
                       ))}
                     </tr>
@@ -291,7 +300,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t border-slate-800 py-8 text-center text-slate-600 text-xs">
-        XlsxFlow · MIT Core / $5 PPP Pro · Built on ECMA-376 Open XML Standard
+        XlsxFlow · Core is MIT licensed · Pro is sold under a commercial license
       </footer>
     </div>
   );

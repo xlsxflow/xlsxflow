@@ -11,7 +11,7 @@ export async function validateOrderAndGenerateLicense(orderId: string) {
 
     // Call the Polar.sh API to verify the order.
     // Use the custom POLAR_API_URL if provided, else default to production.
-    const apiUrl = process.env.POLAR_API_URL || "https://api.polar.sh/api/v1/orders";
+    const apiUrl = process.env.POLAR_API_URL || "https://api.polar.sh/v1/orders";
     const res = await fetch(`${apiUrl}/${encodeURIComponent(orderId)}`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -19,7 +19,7 @@ export async function validateOrderAndGenerateLicense(orderId: string) {
     });
 
     if (!res.ok) {
-      if (res.status === 404) {
+      if (res.status === 404 || res.status === 422) {
         throw new Error("Order not found or invalid.");
       }
       throw new Error(`Polar API error: ${res.statusText}`);
@@ -40,7 +40,7 @@ export async function validateOrderAndGenerateLicense(orderId: string) {
     }
 
     return { success: true, license: createLicenseKey(orderId) };
-  } catch (error: any) {
-    return { success: false, error: error.message };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

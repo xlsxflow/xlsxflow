@@ -4,6 +4,15 @@
   "description": "Streaming, zero-dependency .xlsx reader and writer for Node, browsers and Edge runtimes",
   "license": "MIT",
   "author": "Omkar Palika",
+  "homepage": "https://github.com/xlsxflow/xlsxflow#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xlsxflow/xlsxflow.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/xlsxflow/xlsxflow/issues"
+  },
   "type": "module",
   "keywords": [
     "xlsx",

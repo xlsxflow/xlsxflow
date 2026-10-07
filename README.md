@@ -26,11 +26,11 @@ Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files
 
 ## Features
 
-- **Zero Dependencies**: Pure modern TypeScript, leveraging native browser/Node Web APIs.
-- **True Streaming**: Parse gigabytes of Excel data using `ReadableStream` with almost zero memory overhead.
-- **Edge Native**: Fully compatible with Node.js, Deno, Bun, Cloudflare Workers, and modern browsers.
-- **Read & Write**: Stream massive `.xlsx` files and generate them on the fly.
-- **Styles & Formulas**: Fonts, fills, borders, alignment, number formats, data bars / color scales, cached formula results, dates, hyperlinks, autofilters and images. Read formulas and styles back. All MIT, all free.
+- **No dependencies**: TypeScript on Web APIs (`ReadableStream`, `CompressionStream`, `Blob`).
+- **Streaming**: rows are read and written one at a time, so memory stays flat as files grow (10M cells written with about 1 MB of extra heap; see [Benchmarks](#benchmarks)).
+- **Runs anywhere with Web APIs**: tested on Node 20.12+, Bun and browsers. Deno and Cloudflare Workers provide the same APIs but are not tested yet.
+- **Read, write and edit**: stream rows out of a file, generate one on the fly, or change cells, rows, columns and sheets of an existing file while keeping everything else in it.
+- **Styles and formulas**: fonts, fills, borders, alignment, number formats, conditional formats, validations, tables, notes, hyperlinks, autofilters, images, protection and page setup. Formulas and styles read back too.
 
 ## Installation
 
@@ -226,10 +226,10 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 | Library | Read Time | Peak RSS |
 |---|---|---|
-| **XlsxFlow** | **2,415 ms** | **92 MB** |
-| ExcelJS (streaming reader) | 3,010 ms | 267 MB |
-| ExcelJS | 4,227 ms | 660 MB |
-| SheetJS (`xlsx` 0.18.5) | 6,035 ms | 544 MB |
+| **XlsxFlow** | **2,279 ms** | **96 MB** |
+| ExcelJS 4.4 (streaming reader) | 2,669 ms | 263 MB |
+| ExcelJS 4.4 | 3,680 ms | 667 MB |
+| SheetJS 0.20.3 | 6,091 ms | 549 MB |
 
 ---
 
@@ -242,7 +242,6 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 - **New:** `SheetEditor` restyles existing cells (`setCells` with `style`), adds sheets (`addSheet`) and deletes them (`deleteSheet`); `parseCsv` streams CSV rows, which `SheetWriter.addSheet` turns into xlsx; notes take formatted text runs.
 - **New, closing ExcelJS gaps:** `SheetEditor.setCells` edits cells of existing files; cell notes on write and `getComments()` on read; conditional formats `cellIs`, `expression`, `top10`, `aboveAverage`, text rules, `duplicateValues`/`uniqueValues` and `iconSet`; Excel tables; sheet protection; page setup, margins, header/footer, print area and titles; row heights, hidden rows/columns and outline grouping; tab colour; validation operators and messages.
 - **Changed:** `[Content_Types].xml` is now written last in the ZIP, since streamed sheets decide which parts exist. Readers use the ZIP's central directory, so entry order does not matter.
-- **Renamed:** SheetForge is now XlsxFlow. Packages are `@xlsxflow/core` and `@xlsxflow/pro`, and `SheetForge.readFile` is `XlsxFlow.readFile`.
 - **Fixed: reader dropped/corrupted cells at stream chunk boundaries** (the XML tokenizer discarded buffered characters between chunks). Large files from ExcelJS/SheetJS now read back exactly.
 - **Fixed: styles pointed at the wrong font/fill/border** (off-by-one against the default entries), and styles used by `AsyncIterable` rows were missing from `styles.xml`.
 - **Real backpressure** in the ZIP writer and worksheet stream; producer errors now error the output stream instead of hanging it.
@@ -335,5 +334,5 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ## License
 
-`@xlsxflow/core` is licensed under the [MIT License](packages/core/LICENSE). A commercial `@xlsxflow/pro` add-on is planned; it will be a separate package under its own license and never changes the terms of the core.
+`@xlsxflow/core` is licensed under the [MIT License](https://github.com/xlsxflow/xlsxflow/blob/main/packages/core/LICENSE). A commercial `@xlsxflow/pro` add-on is planned; it will be a separate package under its own license and never changes the terms of the core.
 
