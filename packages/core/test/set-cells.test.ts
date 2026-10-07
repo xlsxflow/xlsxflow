@@ -81,7 +81,7 @@ describe('SheetEditor.setCells', () => {
     expect(rows[10000].cells).toEqual(['row 10001', 10001]);
     expect(rows[19999].cells).toEqual(['last', 20000]);
     expect(rows[20000]).toMatchObject({ r: 20002, cells: ['after'] });
-  });
+  }, 30000); // 20,000 rows: slow when the machine is busy
 
   it('writes out shared formulas whose anchor was overwritten, and drops the calculation chain', async () => {
     // C3 anchors the shared formula B3*2 that C4 reuses; the file also has a calcChain

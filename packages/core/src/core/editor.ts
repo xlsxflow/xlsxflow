@@ -4,8 +4,12 @@ import { Row, SheetOptions, CellValue, CellStyle } from './types';
 import { ZipStreamWriter } from './zip-stream-writer';
 import { StylePatcher } from './style-patcher';
 import {
+  AxisMap, createShiftTransform, mapComments, mapVml, mapDrawing, mapTable, mapChart, mapPivotCache, mapDefinedNames,
+  type ShiftOp, type ShiftMaps,
+} from './sheet-shift';
+import {
   resolveWorkbookParts, partRelationships, recalcOnOpen, attr, dirOf, relsPathOf, validateSheetName,
-  colIndex, colLetter, dateToSerial, encodeXString, shiftFormula, type WorkbookParts,
+  colIndex, colLetter, dateToSerial, MAX_ROWS, MAX_COLUMNS, encodeXString, shiftFormula, escapeXml, unescapeXml, escapeRe, type WorkbookParts,
 } from './utils';
 
 // A new cell value; null clears it. The object form sets a formula (leading "=" optional) or a value,
@@ -23,13 +27,6 @@ function contentOf(edit: CellEdit): CellValue | { formula: string } | typeof KEE
 const styleOf = (edit: CellEdit) =>
   edit !== null && typeof edit === 'object' && !(edit instanceof Date) ? edit.style : undefined;
 
-const escapeXml = (val: string) =>
-  val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const unescapeXml = (s: string) =>
-  s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (m, hex, dec, name) =>
-    hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(parseInt(dec, 10))
-      : ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[name] ?? m);
 
 // The cell XML for an edit; `attrs` keeps the existing cell's style (s=...) and other attributes
 function editedCell(p: string, ref: string, attrs: string, edit: CellValue | { formula: string }): string {
@@ -79,6 +76,7 @@ export class SheetEditor {
   private cellEdits = new Map<string, EditedRows>();
   private additions = new Map<string, Row[]>();
   private deletions = new Set<string>();
+  private shiftOps = new Map<string, { rows: ShiftOp[]; cols: ShiftOp[] }>();
 
   // Appends `rows` after the last existing row of sheet `sheetName`.
   appendSheet(sheetName: string, rows: Row[], options: SheetOptions = {}) {
@@ -113,6 +111,42 @@ export class SheetEditor {
   // Formulas in other sheets that point at it are not rewritten.
   deleteSheet(sheetName: string): this {
     this.deletions.add(sheetName);
+    return this;
+  }
+
+  // Inserts `count` empty rows before row `at`. Everything below moves down, and every reference to
+  // the moved rows follows them: formulas on any sheet, defined names, merges, conditional formats,
+  // validations, hyperlinks, tables, pictures, notes, sparklines, chart series and pivot sources. A
+  // range that spans row `at` grows. setCells addresses count after the rows have moved.
+  insertRows(sheetName: string, at: number, count = 1): this {
+    return this.shiftOp(sheetName, 'rows', at, count, true);
+  }
+
+  // Deletes rows start..start+count-1. References to the deleted cells become #REF!, as in Excel, and
+  // ranges that covered them shrink.
+  deleteRows(sheetName: string, start: number, count = 1): this {
+    return this.shiftOp(sheetName, 'rows', start, count, false);
+  }
+
+  // Inserts `count` empty columns before column `at` ('C' or 3), like insertRows. Inserting inside a
+  // table adds table columns named Column1, Column2...
+  insertColumns(sheetName: string, at: number | string, count = 1): this {
+    return this.shiftOp(sheetName, 'cols', typeof at === 'string' ? colIndex(at) + 1 : at, count, true);
+  }
+
+  // Deletes columns start..start+count-1 ('C' or 3), like deleteRows
+  deleteColumns(sheetName: string, start: number | string, count = 1): this {
+    return this.shiftOp(sheetName, 'cols', typeof start === 'string' ? colIndex(start) + 1 : start, count, false);
+  }
+
+  private shiftOp(sheetName: string, axis: 'rows' | 'cols', at: number, count: number, insert: boolean): this {
+    const max = axis === 'rows' ? MAX_ROWS : MAX_COLUMNS;
+    if (!Number.isInteger(at) || at < 1 || at > max || !Number.isInteger(count) || count < 1) {
+      throw new Error(`Invalid ${axis === 'rows' ? 'rows' : 'columns'}: start ${at}, count ${count}.`);
+    }
+    let ops = this.shiftOps.get(sheetName);
+    if (!ops) this.shiftOps.set(sheetName, ops = { rows: [], cols: [] });
+    ops[axis].push({ at, count, insert });
     return this;
   }
 
@@ -151,8 +185,71 @@ export class SheetEditor {
           added.set(await insertSheet(sheetName, parts, read, overlay, free), rowsToEdits(sheetName, rows));
         }
 
+        // Moving rows: every sheet's formulas may point at them, so all sheets stream through a
+        // transform; the parts tied to a sheet's rows and the workbook's names are rewritten whole
+        const rowMaps: ShiftMaps = new Map();
+        for (const [sheetName, ops] of this.shiftOps) {
+          pathOf(sheetName);
+          rowMaps.set(sheetName.toLowerCase(), {
+            rows: ops.rows.length ? new AxisMap(ops.rows) : undefined,
+            cols: ops.cols.length ? new AxisMap(ops.cols) : undefined,
+          });
+        }
+        const shiftByPath = new Map<string, string>();
+        if (rowMaps.size) {
+          const update = async (path: string, change: (xml: string) => string) => {
+            if (!zipIn.has(path) || written.has(path)) return;
+            const xml = await read(path);
+            const changed = change(xml);
+            if (changed !== xml) overlay.set(path, changed);
+          };
+          await update(parts.workbookPath, wb => mapDefinedNames(wb, rowMaps));
+          for (const [sheetName, path] of parts.sheets) {
+            if (this.deletions.has(sheetName)) continue;
+            shiftByPath.set(path, sheetName);
+            const map = rowMaps.get(sheetName.toLowerCase());
+            for (const rel of await partRelationships(read, path)) {
+              if (rel.external) continue;
+              const type = rel.type.slice(rel.type.lastIndexOf('/'));
+              if (type === '/table') {
+                await update(rel.path, xml => {
+                  const { xml: table, headers } = mapTable(xml, sheetName, rowMaps);
+                  // Columns inserted into a table need header cells matching their names
+                  if (headers.length) {
+                    const edits: EditedRows = new Map([...editsByPath.get(path) ?? []].map(([r, cells]) => [r, new Map(cells)]));
+                    for (const { ref, name } of headers) {
+                      const m = /^([A-Z]+)(\d+)$/.exec(ref)!;
+                      const r = parseInt(m[2], 10), c = colIndex(m[1]);
+                      if (!edits.has(r)) edits.set(r, new Map());
+                      if (!edits.get(r)!.has(c)) edits.get(r)!.set(c, name);
+                    }
+                    editsByPath.set(path, edits);
+                  }
+                  return table;
+                });
+              }
+              if (!map) continue;
+              if (type === '/comments' || type === '/threadedComment') await update(rel.path, xml => mapComments(xml, map));
+              if (type === '/vmlDrawing') await update(rel.path, xml => mapVml(xml, map));
+              if (type === '/drawing') await update(rel.path, xml => mapDrawing(xml, map));
+            }
+          }
+          // Charts on any sheet can plot the moved rows, and so can pivot tables
+          for (const path of parts.sheets.values()) {
+            for (const rel of await partRelationships(read, path)) {
+              if (rel.external || !rel.type.endsWith('/drawing')) continue;
+              for (const chart of await partRelationships(read, rel.path)) {
+                if (!chart.external && chart.type.endsWith('/chart')) await update(chart.path, xml => mapChart(xml, rowMaps));
+              }
+            }
+          }
+          for (const rel of await partRelationships(read, parts.workbookPath)) {
+            if (!rel.external && rel.type.endsWith('/pivotCacheDefinition')) await update(rel.path, xml => mapPivotCache(xml, rowMaps));
+          }
+        }
+
         // Edited cells invalidate cached formula results
-        if (editsByPath.size || added.size || this.deletions.size) {
+        if (editsByPath.size || added.size || this.deletions.size || rowMaps.size) {
           const { replace, drop } = await recalcOnOpen(read, parts, await read(parts.workbookPath));
           for (const [path, xml] of replace) overlay.set(path, xml);
           for (const path of drop) written.add(path);
@@ -189,8 +286,10 @@ export class SheetEditor {
           if (written.has(filename)) continue;
           const rows = appendByPath.get(filename);
           const edits = editsByPath.get(filename);
-          if (rows || edits) {
+          const shift = shiftByPath.get(filename);
+          if (rows || edits || shift !== undefined) {
             let text = decode(await zipIn.extractStream(filename));
+            if (shift !== undefined) text = text.pipeThrough(createShiftTransform(shift, rowMaps));
             if (edits) text = text.pipeThrough(this.createEditTransform(edits, patcher));
             if (rows) text = text.pipeThrough(this.createInjectTransform(rows));
             await zipOut.addFile(filename, encode(text));

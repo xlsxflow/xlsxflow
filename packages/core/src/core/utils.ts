@@ -184,6 +184,7 @@ export function mapFormulaRefs(formula: string, mapCol: RefMapper, mapRow: RefMa
     let prevEnd = -1;
     let prevSheet: string | undefined;
     let prevRow = 0;
+    let prevCol = 0;
     parts[i] = part.replace(REF_RE, (m: string, ...g: any[]) => {
       const offset: number = g[12];
       const before = part.slice(0, offset);
@@ -208,13 +209,15 @@ export function mapFormulaRefs(formula: string, mapCol: RefMapper, mapRow: RefMa
       let out: string | null;
       if (g[1] !== undefined) {
         const c = col(g[0], g[1], role), r = row(g[2], g[3], role);
-        // The end of a range must not land above its start (rows removed from under it)
-        const inverted = r !== null && role === 'end' && r < prevRow;
+        const ci = c === null ? 0 : colIndex(c.replace('$', ''));
+        // The end of a range must not land above or left of its start (rows or columns removed under it)
+        const inverted = role === 'end' && (r !== null && r < prevRow || c !== null && ci < prevCol);
         prevRow = r ?? 0;
+        prevCol = ci;
         out = c === null || r === null || inverted ? null : c + g[2] + r;
       } else if (g[5] !== undefined) {
         const a = col(g[4], g[5], 'start'), b = col(g[6], g[7], 'end');
-        out = a === null || b === null ? null : `${a}:${b}`;
+        out = a === null || b === null || colIndex(b.replace('$', '')) < colIndex(a.replace('$', '')) ? null : `${a}:${b}`;
       } else {
         const a = row(g[8], g[9], 'start'), b = row(g[10], g[11], 'end');
         out = a === null || b === null || b < a ? null : `${g[8]}${a}:${g[10]}${b}`;
@@ -302,3 +305,11 @@ export function validateSheetName(name: string, existing: Iterable<string>): voi
     if (other.toLowerCase() === name.toLowerCase()) throw new Error(`Duplicate sheet name "${name}".`);
   }
 }
+
+export const escapeXml = (val: string) =>
+  val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+export const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const unescapeXml = (s: string) =>
+  s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (m, hex, dec, name) =>
+    hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(parseInt(dec, 10))
+      : ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[name] ?? m);

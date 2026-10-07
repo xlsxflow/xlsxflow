@@ -126,6 +126,9 @@ editor.setCells('Sheet1', {
   B3: { value: 7, style: { numFmt: '0.00' } },
 });
 editor.appendSheet('Sheet1', [['new', 'row']]); // appended after the last existing row
+editor.insertRows('Sheet1', 5, 3);  // 3 empty rows before row 5
+editor.deleteRows('Sheet1', 20, 2); // rows 20-21
+editor.insertColumns('Sheet1', 'C');  // or deleteColumns('Sheet1', 'C', 2)
 editor.addSheet('Summary', [['Total', { value: null, formula: 'SUM(Sheet1!B:B)' }]]);
 editor.deleteSheet('Old');
 const edited = editor.edit(createBlobReader(existingBlob)); // ReadableStream<Uint8Array>
@@ -133,7 +136,12 @@ const edited = editor.edit(createBlobReader(existingBlob)); // ReadableStream<Ui
 
 Edited cells keep their style. A style change is merged into the cell's current format: font properties, border sides and alignment settings you name change and the rest stay, while a fill or number format replaces the old one. The sheet streams through one row at a time, and every other part of the file is copied without being unpacked. Excel recalculates formulas when it opens the file. A shared formula whose first cell is overwritten is written out in full in the cells that used it.
 
-`addSheet` takes values, formulas and styles; for hyperlinks, notes and sheet options, write the workbook with `SheetWriter`. `deleteSheet` removes names scoped to the sheet and turns other defined names that point at it into `#REF!`; formulas in other sheets that point at it are not rewritten. Inserting or deleting rows in an existing file is not supported.
+`addSheet` takes values, formulas and styles; for hyperlinks, notes and sheet options, write the workbook with `SheetWriter`. `deleteSheet` removes names scoped to the sheet and turns other defined names that point at it into `#REF!`; formulas in other sheets that point at it are not rewritten. `insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move everything that points at the cells, as Excel does:
+- formulas on every sheet and the workbook's defined names (print areas, named ranges);
+- merged cells, conditional formats, validations, hyperlinks, the filter and its column filters, page breaks and column widths;
+- tables, pictures, notes, sparklines, What-If data tables, chart series and pivot-table sources.
+
+Ranges that span inserted rows or columns grow, and ranges over deleted ones shrink. References to deleted cells become `#REF!`. Columns inserted inside a table become table columns named Column1, Column2 and so on. Deleting a table's header row, all its data rows or all its columns is refused. Operations run in the order given, and `setCells` addresses count after the cells have moved. Inserted rows and columns are empty: they don't copy the formatting of their neighbours. Every sheet streams through the editor, because any of its formulas might point at the moved cells.
 
 ## Styles, Formulas & Conditional Formats
 
@@ -214,6 +222,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 ### Unreleased
 
 - **Corrected benchmarks:** the earlier ExcelJS write time (13.5 s) came from a cold first run; warm, it is 1.8 s. write-excel-file was listed as running out of memory, but the harness used its old API and never ran it. Failures are now reported as failures, not out-of-memory.
+- **New:** `SheetEditor.insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move cells in existing files, with every reference to them: formulas on all sheets, defined names, merges, conditional formats, validations, hyperlinks, filters, page breaks, column widths, tables, pictures, notes, sparklines, data tables, chart series and pivot sources.
 - **New:** `SheetEditor` restyles existing cells (`setCells` with `style`), adds sheets (`addSheet`) and deletes them (`deleteSheet`); `parseCsv` streams CSV rows, which `SheetWriter.addSheet` turns into xlsx; notes take formatted text runs.
 - **New, closing ExcelJS gaps:** `SheetEditor.setCells` edits cells of existing files; cell notes on write and `getComments()` on read; conditional formats `cellIs`, `expression`, `top10`, `aboveAverage`, text rules, `duplicateValues`/`uniqueValues` and `iconSet`; Excel tables; sheet protection; page setup, margins, header/footer, print area and titles; row heights, hidden rows/columns and outline grouping; tab colour; validation operators and messages.
 - **Changed:** `[Content_Types].xml` is now written last in the ZIP, since streamed sheets decide which parts exist. Readers use the ZIP's central directory, so entry order does not matter.
