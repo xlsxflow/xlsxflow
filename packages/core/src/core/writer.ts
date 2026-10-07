@@ -1,4 +1,4 @@
-import { Row, StyledCell, CellValue, SheetOptions, SheetImage, CellComment, TableOptions, PageSetup, RichTextRun } from './types';
+import { Row, StyledCell, CellValue, SheetOptions, SheetImage, CellComment, TableOptions, PageSetup, RichTextRun, WorkbookProperties, DefinedName } from './types';
 import { StyleEngine, fontXml } from './style-engine';
 import { ConditionalFormatter } from './conditional-formatter';
 import { FormulaEngine } from './formula-engine';
@@ -59,6 +59,31 @@ export interface WriterOptions {
   // Store strings once in xl/sharedStrings.xml instead of inline. Smaller files when values repeat,
   // but every distinct string is kept in memory until the workbook is finished.
   sharedStrings?: boolean;
+  properties?: WorkbookProperties;
+  definedNames?: DefinedName[];
+}
+
+const W3CDTF = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+const propXml = (tag: string, v?: string) => v === undefined ? '' : `<${tag}>${escapeXml(v)}</${tag}>`;
+
+function corePropsXml(p: WorkbookProperties): string {
+  const created = p.created ? `<dcterms:created xsi:type="dcterms:W3CDTF">${W3CDTF(p.created)}</dcterms:created>` : '';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">` +
+    propXml('dc:title', p.title) + propXml('dc:subject', p.subject) + propXml('dc:creator', p.creator) + propXml('cp:keywords', p.keywords) +
+    propXml('dc:description', p.description) + propXml('cp:category', p.category) + created + '</cp:coreProperties>';
+}
+
+function appPropsXml(p: WorkbookProperties): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>XlsxFlow</Application>${propXml('Manager', p.manager)}${propXml('Company', p.company)}</Properties>`;
+}
+
+// A name Excel accepts: letters, digits, _ . and \, not a cell reference (A1, R1C1) and not reserved
+function validateDefinedName(name: string) {
+  if (!/^[A-Za-z_\\][A-Za-z0-9_.\\]*$/.test(name) || /^[A-Za-z]{1,3}\d+$/.test(name) || /^([Rr]\d*)?([Cc]\d*)?$/.test(name) || /^_xlnm\./i.test(name)) {
+    throw new Error(`Invalid defined name "${name}"`);
+  }
 }
 
 // Builds a complete .xlsx Uint8Array from structured row data.
@@ -77,6 +102,8 @@ export class SheetWriter {
 
   addSheet(name: string, rows: Row[] | AsyncIterable<Row>, options: SheetOptions = {}): this {
     validateSheetName(name, this.sheets.map(s => s.name));
+    const zoom = options.view?.zoom;
+    if (zoom !== undefined && !(zoom >= 10 && zoom <= 400)) throw new Error(`Zoom must be between 10 and 400, got ${zoom}`);
     this.sheets.push({ name, rows, options });
     return this;
   }
@@ -89,6 +116,16 @@ export class SheetWriter {
     if (this.sheets.length === 0) {
       this.addSheet('Sheet1', []);
     }
+    if (this.activeSheet() < 0) throw new Error('A workbook needs at least one visible sheet');
+    const scopes = new Set<string>();
+    for (const n of this.writerOptions.definedNames ?? []) {
+      validateDefinedName(n.name);
+      if (n.sheet !== undefined && !this.sheets.some(s => s.name === n.sheet)) throw new Error(`Sheet "${n.sheet}" of defined name "${n.name}" not found`);
+      const key = `${n.sheet ?? ''}!${n.name.toLowerCase()}`;
+      if (scopes.has(key)) throw new Error(`Duplicate defined name "${n.name}"`);
+      scopes.add(key);
+    }
+    const props = this.writerOptions.properties;
 
     const zip = new ZipStreamWriter();
     for (const img of this.sheets.flatMap(s => s.options.images ?? [])) {
@@ -107,6 +144,10 @@ export class SheetWriter {
         await this.streamString(zip, '_rels/.rels', this.buildRootRels());
         await this.streamString(zip, 'xl/workbook.xml', this.buildWorkbookXml());
         await this.streamString(zip, 'xl/_rels/workbook.xml.rels', this.buildWorkbookRels());
+        if (props) {
+          await this.streamString(zip, 'docProps/core.xml', corePropsXml(props));
+          await this.streamString(zip, 'docProps/app.xml', appPropsXml(props));
+        }
 
         for (let i = 0; i < this.sheets.length; i++) {
           const sheet = this.sheets[i];
@@ -283,15 +324,19 @@ export class SheetWriter {
       ? `<sheetFormatPr defaultRowHeight="15"${outlineRow ? ` outlineLevelRow="${outlineRow}"` : ''}${outlineCol ? ` outlineLevelCol="${outlineCol}"` : ''}/>`
       : '';
 
-    let sheetViews = '';
+    let pane = '';
     if (options.freezePanes) {
       const { row = 0, col = 0 } = options.freezePanes;
       let activePane = 'bottomRight';
       if (row > 0 && col === 0) activePane = 'bottomLeft';
       if (row === 0 && col > 0) activePane = 'topRight';
       const topLeftCell = colLetter(col) + (row + 1);
-      sheetViews = `<sheetViews><sheetView tabSelected="1" workbookViewId="0"><pane ySplit="${row}" xSplit="${col}" topLeftCell="${topLeftCell}" activePane="${activePane}" state="frozen"/></sheetView></sheetViews>`;
+      pane = `<pane ySplit="${row}" xSplit="${col}" topLeftCell="${topLeftCell}" activePane="${activePane}" state="frozen"/>`;
     }
+    const view = options.view ?? {};
+    const viewAttrs = (view.showGridLines === false ? ' showGridLines="0"' : '') + (view.showHeadings === false ? ' showRowColHeaders="0"' : '') +
+      (view.rightToLeft ? ' rightToLeft="1"' : '') + (view.zoom !== undefined ? ` zoomScale="${Math.round(view.zoom)}"` : '');
+    const sheetViews = pane || viewAttrs ? `<sheetViews><sheetView${viewAttrs} workbookViewId="0">${pane}</sheetView></sheetViews>` : '';
 
     let header = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n`;
     header += `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">\n`;
@@ -471,9 +516,15 @@ export class SheetWriter {
   }
 
   private buildWorkbookXml(): string {
-    const sheetsXml = this.sheets.map((s, i) => 
-      `<sheet name="${escapeXml(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`
+    const sheetsXml = this.sheets.map((s, i) =>
+      `<sheet name="${escapeXml(s.name)}" sheetId="${i + 1}"${s.options.state && s.options.state !== 'visible' ? ` state="${s.options.state}"` : ''} r:id="rId${i + 1}"/>`
     ).join('');
+    const userNames = (this.writerOptions.definedNames ?? []).map(n => {
+      const local = n.sheet === undefined ? '' : ` localSheetId="${this.sheets.findIndex(s => s.name === n.sheet)}"`;
+      const ref = n.ref.startsWith('=') ? n.ref.slice(1) : n.ref;
+      return `<definedName name="${escapeXml(n.name)}"${n.comment ? ` comment="${escapeXml(n.comment)}"` : ''}${local}${n.hidden ? ' hidden="1"' : ''}>${escapeXml(ref)}</definedName>`;
+    }).join('');
+    const active = this.activeSheet();
     // Excel tracks each sheet's filter range in a hidden defined name
     const filterNames = this.sheets.map((s, i) => s.options.autoFilter
       ? `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">${escapeXml(`'${s.name.replace(/'/g, "''")}'!${absoluteRef(s.options.autoFilter)}`)}</definedName>`
@@ -491,11 +542,17 @@ export class SheetWriter {
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
   xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  ${active > 0 ? `<bookViews><workbookView firstSheet="${active}" activeTab="${active}"/></bookViews>` : ''}
   <sheets>
     ${sheetsXml}
   </sheets>
-  ${filterNames ? `<definedNames>${filterNames}</definedNames>` : ''}
+  ${filterNames || userNames ? `<definedNames>${filterNames}${userNames}</definedNames>` : ''}
 </workbook>`;
+  }
+
+  // The first visible sheet, which Excel opens on
+  private activeSheet(): number {
+    return this.sheets.findIndex(s => !s.options.state || s.options.state === 'visible');
   }
 
   private buildWorkbookRels(): string {
@@ -517,7 +574,9 @@ export class SheetWriter {
   private buildRootRels(): string {
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>${this.writerOptions.properties ? `
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>` : ''}
 </Relationships>`;
   }
 
@@ -542,7 +601,9 @@ export class SheetWriter {
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   ${sheetOverrides}
   <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
-  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${this.writerOptions.properties ? `
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>` : ''}
 </Types>`;
   }
 

@@ -223,6 +223,38 @@ export interface SheetOptions {
   pageSetup?: PageSetup;
   tables?: TableOptions[];
   tabColor?: string;                  // ARGB hex
+  state?: 'visible' | 'hidden' | 'veryHidden'; // veryHidden sheets can only be shown again from VBA
+  view?: SheetView;
+}
+
+export interface SheetView {
+  zoom?: number;               // percent, 10-400
+  showGridLines?: boolean;     // default true
+  showHeadings?: boolean;      // row and column headings, default true
+  rightToLeft?: boolean;
+}
+
+// docProps/core.xml and docProps/app.xml: what Excel shows under File > Info
+export interface WorkbookProperties {
+  title?: string;
+  subject?: string;
+  creator?: string;
+  keywords?: string;
+  description?: string;
+  category?: string;
+  company?: string;
+  manager?: string;
+  created?: Date;
+}
+
+// A named range or constant. `ref` is a formula without "=": "Data!$A$1:$B$10", "0.18", "SUM(Data!$B:$B)".
+// With `sheet`, the name is local to that sheet.
+export interface DefinedName {
+  name: string;
+  ref: string;
+  sheet?: string;
+  comment?: string;
+  hidden?: boolean;
 }
 
 // A PNG, JPEG or GIF picture (format detected from the bytes). Passing the same `data` object

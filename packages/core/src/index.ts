@@ -1,10 +1,10 @@
-export { SheetReader, type ParseOptions, sheetToJson, streamToCsv, createBlobReader, createFileReader, type RandomAccessReader } from './core/index';
+export { SheetReader, type ParseOptions, type WorkbookInfo, sheetToJson, streamToCsv, createBlobReader, createFileReader, type RandomAccessReader } from './core/index';
 export { SheetEditor, type CellEdit } from './core/editor';
 export { parseCsv, type CsvOptions } from './core/csv';
 export { SheetWriter, legacyPasswordHash, type WriterOptions } from './core/writer';
 export { createXmlStreamParser } from './core/xml-stream';
 export { parseWorksheet, type RowData, type SheetMetadata, type SheetComment } from './core/worksheet-parser';
-export type { CellValue, StyledCell, Row, CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, BorderSide, RichTextRun, SheetOptions, SheetImage, CellComment, HighlightStyle, ComparisonOperator, RowOptions, ColumnOptions, SheetProtection, PageSetup, TableOptions, ConditionalFormatRule, ConditionalFormat, DataValidation } from './core/types';
+export type { CellValue, StyledCell, Row, CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, BorderSide, RichTextRun, SheetOptions, SheetImage, CellComment, HighlightStyle, ComparisonOperator, RowOptions, ColumnOptions, SheetProtection, PageSetup, TableOptions, SheetView, WorkbookProperties, DefinedName, ConditionalFormatRule, ConditionalFormat, DataValidation } from './core/types';
 export { StyleEngine } from './core/style-engine';
 export { FormulaEngine } from './core/formula-engine';
 export { ConditionalFormatter } from './core/conditional-formatter';

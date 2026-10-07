@@ -2,10 +2,10 @@ import { RandomAccessReader } from './random-access';
 import { ZipRandomAccessParser } from './zip-random-access';
 import { createXmlBatchParser, XmlToken } from './xml-stream';
 import { parseWorksheet, parseComments, ParseResult, RichTextCollector } from './worksheet-parser';
-import { resolveWorkbookParts, partRelationships, hyperlinkTargets, decodeXString, isDateFormatCode } from './utils';
+import { resolveWorkbookParts, partRelationships, hyperlinkTargets, decodeXString, isDateFormatCode, attr, unescapeXml } from './utils';
 import { parseThemeColors, colorResolver, applyFontElement, ColorResolver } from './style-reader';
 import { readSheetImages } from './image';
-import type { CellStyle, CellFont, CellFill, GradientFill, CellBorder, BorderSide, CellAlignment, RichTextRun } from './types';
+import type { CellStyle, CellFont, CellFill, GradientFill, CellBorder, BorderSide, CellAlignment, RichTextRun, DefinedName, WorkbookProperties } from './types';
 export { SheetWriter } from './writer';
 export { createFileReader, createBlobReader, type RandomAccessReader } from './random-access';
 export { sheetToJson, streamToCsv, resolveSheetPaths } from './utils';
@@ -20,6 +20,7 @@ export interface ParseOptions {
   formulas?: boolean; // report cell formulas in RowData.formulas
   styles?: boolean;   // report cell styles in RowData.styles
   richText?: boolean; // report formatted text runs in RowData.richText
+  formatted?: boolean; // report each cell's text as Excel shows it (en-US) in RowData.formatted
 }
 
 // Number formats Excel does not write into styles.xml (ECMA-376 Part 1, 18.8.30)
@@ -31,7 +32,27 @@ const BUILTIN_NUM_FMTS: [number, string][] = [
   [45, 'mm:ss'], [46, '[h]:mm:ss'], [47, 'mmss.0'], [48, '##0.0E+0'], [49, '@'],
 ];
 
+// Formats Excel stores by id only and shows by locale, as en-US Excel shows them
+const DISPLAY_NUM_FMTS = new Map<number, string>([
+  [5, '"$"#,##0_);("$"#,##0)'], [6, '"$"#,##0_);[Red]("$"#,##0)'], [7, '"$"#,##0.00_);("$"#,##0.00)'], [8, '"$"#,##0.00_);[Red]("$"#,##0.00)'],
+  [14, 'm/d/yyyy'], [22, 'm/d/yyyy h:mm'],
+  [41, '_(* #,##0_);_(* \\(#,##0\\);_(* "-"_);_(@_)'], [42, '_("$"* #,##0_);_("$"* \\(#,##0\\);_("$"* "-"_);_(@_)'],
+  [43, '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'], [44, '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)'],
+]);
+
 const DEFAULT_MAX_PART_BYTES = 1 << 30;
+
+export interface WorkbookInfo {
+  sheets: { name: string; state: 'visible' | 'hidden' | 'veryHidden' }[]; // in tab order
+  definedNames: DefinedName[]; // includes Excel's own, such as _xlnm.Print_Area
+  properties: WorkbookProperties;
+}
+
+// Text of the first <tag> element in xml, unescaped
+const elementText = (xml: string, tag: string) => {
+  const m = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(xml);
+  return m ? unescapeXml(m[1]) : undefined;
+};
 
 function createByteLimitStream(maxBytes: number): TransformStream<Uint8Array, Uint8Array> {
   let bytesRead = 0;
@@ -55,6 +76,51 @@ export async function readSharedStrings(stream: ReadableStream<Uint8Array>): Pro
 }
 
 export class SheetReader {
+  // Sheet names and visibility, defined names and document properties, without reading any sheet
+  async readWorkbook(reader: RandomAccessReader, options?: Pick<ParseOptions, 'maxUncompressedBytes'>): Promise<WorkbookInfo> {
+    const zip = new ZipRandomAccessParser(reader);
+    await zip.parseCentralDirectory();
+    const max = options?.maxUncompressedBytes ?? DEFAULT_MAX_PART_BYTES;
+    const readText = async (name: string) => zip.has(name)
+      ? this.readStreamToString(max !== Infinity ? (await zip.extractStream(name)).pipeThrough(createByteLimitStream(max)) : await zip.extractStream(name))
+      : '';
+    const parts = await resolveWorkbookParts(readText);
+
+    const sheets: WorkbookInfo['sheets'] = [];
+    for (const [tag] of parts.workbookXml.matchAll(/<(?:\w+:)?sheet\b[^>]*>/g)) {
+      const name = attr(tag, 'name');
+      const state = attr(tag, 'state');
+      if (name !== null) sheets.push({ name: unescapeXml(name), state: state === 'hidden' || state === 'veryHidden' ? state : 'visible' });
+    }
+    const definedNames: DefinedName[] = [];
+    for (const [, , open, text] of parts.workbookXml.matchAll(/<((?:\w+:)?)definedName\b([^>]*)>([\s\S]*?)<\/\1definedName>/g)) {
+      const local = attr(open, 'localSheetId');
+      const comment = attr(open, 'comment');
+      const name: DefinedName = { name: unescapeXml(attr(open, 'name') ?? ''), ref: unescapeXml(text) };
+      if (local !== null && sheets[+local]) name.sheet = sheets[+local].name;
+      if (comment !== null) name.comment = unescapeXml(comment);
+      if (/^(?:1|true)$/.test(attr(open, 'hidden') ?? '')) name.hidden = true;
+      definedNames.push(name);
+    }
+
+    const rootRels = await partRelationships(readText, '');
+    const core = await readText(rootRels.find(r => r.type.endsWith('/core-properties'))?.path ?? 'docProps/core.xml');
+    const app = await readText(rootRels.find(r => r.type.endsWith('/extended-properties'))?.path ?? 'docProps/app.xml');
+    const properties: WorkbookProperties = {};
+    for (const [key, tag] of [['title', 'dc:title'], ['subject', 'dc:subject'], ['creator', 'dc:creator'], ['keywords', 'cp:keywords'],
+      ['description', 'dc:description'], ['category', 'cp:category']] as const) {
+      const v = elementText(core, tag);
+      if (v !== undefined) properties[key] = v;
+    }
+    const created = elementText(core, 'dcterms:created');
+    if (created && !isNaN(Date.parse(created))) properties.created = new Date(created);
+    for (const [key, tag] of [['company', 'Company'], ['manager', 'Manager']] as const) {
+      const v = elementText(app, tag);
+      if (v !== undefined) properties[key] = v;
+    }
+    return { sheets, definedNames, properties };
+  }
+
   async parse(reader: RandomAccessReader, options?: ParseOptions): Promise<ParseResult> {
     const zip = new ZipRandomAccessParser(reader);
     await zip.parseCentralDirectory();
@@ -84,9 +150,10 @@ export class SheetReader {
     const stylesPath = parts.styles ?? 'xl/styles.xml';
     let cellStyles: (CellStyle | undefined)[] = [];
     let color = colorResolver(theme);
+    let formats: (string | undefined)[] = [];
     if (zip.has(stylesPath)) {
       const xmlStream = limit(await zip.extractStream(stylesPath)).pipeThrough(createXmlBatchParser());
-      ({ cellStyles, color } = await this.parseStyles(xmlStream, styles, theme));
+      ({ cellStyles, color, formats } = await this.parseStyles(xmlStream, styles, theme));
     }
 
     // 3. Parse Shared Strings (if exists)
@@ -107,6 +174,7 @@ export class SheetReader {
     return parseWorksheet(xmlStream, sharedStrings, styles, is1904, {
       formulas: options?.formulas,
       cellStyles: options?.styles ? cellStyles : undefined,
+      numFmts: options?.formatted ? formats : undefined,
       richText: options?.richText ? color : undefined,
       sharedRichText,
       hyperlinkTargets: await hyperlinkTargets(readText, worksheetZipPath),
@@ -172,6 +240,7 @@ export class SheetReader {
     const fills: (CellFill | GradientFill | undefined)[] = [];
     const borders: (CellBorder | undefined)[] = [];
     const cellStyles: (CellStyle | undefined)[] = [];
+    const formats: (string | undefined)[] = []; // number format code by style index, for formatted text
 
     // Only direct children of these lists count: dxfs and cellStyleXfs reuse the same element names
     let section = '';
@@ -254,6 +323,7 @@ export class SheetReader {
                   const isDate = (numFmtId >= 14 && numFmtId <= 22) || (numFmtId >= 27 && numFmtId <= 36)
                     || (numFmtId >= 45 && numFmtId <= 47) || (numFmtId >= 50 && numFmtId <= 58) || customDateFmts.has(numFmtId);
                   dateStyles.set(index, isDate ? 14 : 0);
+                  formats.push(DISPLAY_NUM_FMTS.get(numFmtId) ?? numFmts.get(numFmtId));
 
                   xf = {};
                   const fontId = parseInt(a['fontId'] || '0', 10);
@@ -318,7 +388,7 @@ export class SheetReader {
     for (const f of fills) if (f?.type === 'gradient') f.stops = f.stops.filter(st => st.color);
     for (const st of cellStyles) if (st?.fill && !fills.includes(st.fill)) delete st.fill;
     // Default-looking styles report as no style
-    return { cellStyles: cellStyles.map(st => (st && Object.keys(st).length ? st : undefined)), color };
+    return { cellStyles: cellStyles.map(st => (st && Object.keys(st).length ? st : undefined)), color, formats };
   }
 
   private async readStreamToString(stream: ReadableStream<Uint8Array>): Promise<string> {

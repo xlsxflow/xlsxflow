@@ -71,6 +71,9 @@ Dates come back as ISO-8601 strings. Opt in to more detail, each indexed like `r
 - `{ formulas: true }` gives `row.formulas`, with shared formulas expanded per cell.
 - `{ styles: true }` gives `row.styles`, as `CellStyle` objects (the same shape the writer takes). Theme and palette colours are resolved to ARGB.
 - `{ richText: true }` gives `row.richText`, the formatted runs of cells that have them. `row.cells` still holds the plain text.
+- `{ formatted: true }` gives `row.formatted`, each cell's text as Excel (en-US) shows it: `1,234.50`, `25.6%`, `(42)`, `08-Oct-2026 2:05 PM`. It covers sections, conditions, dates and elapsed times, fractions, scientific notation, currency and text formats. Repeat fills (`*`) and colours are left out, and other locales are shown as en-US.
+
+`await reader.readWorkbook(createBlobReader(blob))` lists the sheets with their visibility, the defined names and the document properties, without reading any sheet.
 
 Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format. `await rows.getImages()` returns the sheet's pictures in the writer's `images` format too (bytes included, read on that call), so they can be written back unchanged. Charts and shapes are skipped. `await rows.getComments()` returns the sheet's notes as `{ ref, text, author? }`.
 
@@ -105,6 +108,23 @@ const blob = await new Response(writer.write()).blob();
 
 Rows can also be an `AsyncIterable<Row>`, so millions of rows can be generated lazily; the writer only pulls rows as fast as the output is consumed.
 
+Document properties and named ranges go to the constructor; visibility and view settings go to each sheet:
+
+```typescript
+const writer = new SheetWriter({
+  properties: { title: 'Q3 sales', creator: 'Finance', company: 'ACME' }, // File > Info in Excel
+  definedNames: [
+    { name: 'TaxRate', ref: '0.18' },
+    { name: 'Sales', ref: 'Data!$B$2:$B$100' },
+    { name: 'Total', ref: 'Data!$B$101', sheet: 'Data' }, // scoped to one sheet
+  ],
+});
+writer.addSheet('Lookup', lookupRows, { state: 'hidden' }); // or 'veryHidden'
+writer.addSheet('Data', rows, { view: { zoom: 90, showGridLines: false, rightToLeft: false } });
+```
+
+Excel opens on the first visible sheet. Invalid or duplicate names, and a workbook with no visible sheet, are rejected before anything is written.
+
 ### Converting CSV
 
 ```typescript
@@ -137,6 +157,8 @@ const edited = editor.edit(createBlobReader(existingBlob)); // ReadableStream<Ui
 ```
 
 Edited cells keep their style. A style change is merged into the cell's current format: font properties, border sides and alignment settings you name change and the rest stay, while a fill or number format replaces the old one. The sheet streams through one row at a time, and every other part of the file is copied without being unpacked. Excel recalculates formulas when it opens the file. A shared formula whose first cell is overwritten is written out in full in the cells that used it.
+
+Macro-enabled workbooks (`.xlsm`) keep their VBA project and content type through every edit.
 
 `addSheet` takes values, formulas and styles; for hyperlinks, notes and sheet options, write the workbook with `SheetWriter`. `deleteSheet` removes names scoped to the sheet and turns other defined names that point at it into `#REF!`; formulas in other sheets that point at it are not rewritten. `insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move everything that points at the cells, as Excel does:
 - formulas on every sheet and the workbook's defined names (print areas, named ranges);
@@ -237,6 +259,10 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ### Unreleased
 
+- **New:** workbook properties (title, author, company...), defined names, hidden and very hidden sheets, and sheet views (zoom, gridlines, headings, right-to-left) in `SheetWriter`; `SheetReader.readWorkbook` reads them back.
+- **Fixed:** sheets with frozen panes were all marked as selected, so Excel opened them grouped.
+- **New:** `{ formatted: true }` reports each cell's text as Excel shows it, from its number format.
+- **Tested:** `.xlsm` files keep their macros through `SheetEditor`.
 - **Corrected benchmarks:** the earlier ExcelJS write time (13.5 s) came from a cold first run; warm, it is 1.8 s. write-excel-file was listed as running out of memory, but the harness used its old API and never ran it. Failures are now reported as failures, not out-of-memory.
 - **New:** `SheetEditor.insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move cells in existing files, with every reference to them: formulas on all sheets, defined names, merges, conditional formats, validations, hyperlinks, filters, page breaks, column widths, tables, pictures, notes, sparklines, data tables, chart series and pivot sources.
 - **New:** `SheetEditor` restyles existing cells (`setCells` with `style`), adds sheets (`addSheet`) and deletes them (`deleteSheet`); `parseCsv` streams CSV rows, which `SheetWriter.addSheet` turns into xlsx; notes take formatted text runs.

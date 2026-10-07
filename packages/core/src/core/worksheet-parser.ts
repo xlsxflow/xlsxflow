@@ -1,6 +1,7 @@
 import { XmlToken } from './xml-stream';
 import { decodeXString, colIndex, shiftFormula, MAX_COLUMNS } from './utils';
 import { applyFontElement, ColorResolver } from './style-reader';
+import { formatValue } from './number-format';
 import type { CellStyle, RichTextRun, SheetImage } from './types';
 
 export type CellValue = string | number | boolean | null;
@@ -111,11 +112,13 @@ export interface RowData {
   formulas?: (string | undefined)[];
   styles?: (CellStyle | undefined)[]; // shared between cells with the same style: do not mutate
   richText?: (RichTextRun[] | undefined)[]; // only cells whose text has formatted runs
+  formatted?: (string | undefined)[]; // with the `formatted` option: each cell's text as Excel shows it
 }
 
 export interface WorksheetOptions {
   formulas?: boolean;
   cellStyles?: (CellStyle | undefined)[]; // by style index; set to report styles
+  numFmts?: (string | undefined)[];         // number format code by style index; set to report formatted text
   richText?: ColorResolver;                // set to report rich text runs
   sharedRichText?: Map<number, RichTextRun[]>;
   hyperlinkTargets?: Map<string, string>;  // relationship id -> URL
@@ -191,6 +194,8 @@ export function parseWorksheet(
     let rowFormulas: (string | undefined)[] | undefined;
     let rowStyles: (CellStyle | undefined)[] | undefined;
     let rowRichText: (RichTextRun[] | undefined)[] | undefined;
+    let rowFormatted: (string | undefined)[] | undefined;
+    let rawNumber: number | undefined; // a date cell's serial, for formatted text
     const runs = options.richText ? new RichTextCollector(options.richText) : undefined;
     
     let skipDepth = 0;
@@ -223,7 +228,7 @@ export function parseWorksheet(
             if (token.name === 'row') {
               inRow = true;
               currentRow = [];
-              rowFormulas = rowStyles = rowRichText = undefined;
+              rowFormulas = rowStyles = rowRichText = rowFormatted = undefined;
               currentColIndex = 0;
               const r = token.attributes['r'];
               if (r) {
@@ -303,6 +308,7 @@ export function parseWorksheet(
               if (rowFormulas) row.formulas = rowFormulas;
               if (rowStyles) row.styles = rowStyles;
               if (rowRichText) row.richText = rowRichText;
+              if (rowFormatted) row.formatted = rowFormatted;
               yield row;
               inRow = false;
             } else if (token.name === 'c') {
@@ -332,6 +338,7 @@ export function parseWorksheet(
                   if (isNaN(num)) {
                     resolvedValue = currentCellValue; // e.g. t="d" ISO dates
                   } else if (currentStyleId !== null && styles.get(currentStyleId) === 14) {
+                    rawNumber = num;
                     resolvedValue = excelToIsoDate(num, is1904);
                   } else {
                     resolvedValue = num === 0 ? 0 : num; // normalise -0
@@ -354,6 +361,12 @@ export function parseWorksheet(
                   : runs.runs.length ? runs.runs : undefined;
                 if (cellRuns) (rowRichText ??= [])[currentCellCol] = cellRuns;
               }
+              if (options.numFmts && resolvedValue !== null) {
+                const code = currentStyleId !== null ? options.numFmts[currentStyleId] : undefined;
+                (rowFormatted ??= [])[currentCellCol] = currentCellType === 'e' ? String(resolvedValue)
+                  : formatValue(rawNumber ?? resolvedValue, code ?? 'General', is1904);
+              }
+              rawNumber = undefined;
               if (options.cellStyles && currentStyleId !== null) {
                 const style = options.cellStyles[currentStyleId];
                 if (style) (rowStyles ??= [])[currentCellCol] = style;
