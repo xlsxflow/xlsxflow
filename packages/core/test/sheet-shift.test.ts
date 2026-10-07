@@ -129,7 +129,7 @@ describe('SheetEditor.insertRows / deleteRows', () => {
 
   it('writes out shared formulas when rows move under them', async () => {
     // Report!C3 holds B3*2, shared into C4
-    const tpl = new Uint8Array(readFileSync(new URL('../../pro/test/fixtures/openpyxl-template.xlsx', import.meta.url)));
+    const tpl = new Uint8Array(readFileSync(new URL('./fixtures/openpyxl-template.xlsx', import.meta.url)));
     const out = await bytesOf(new SheetEditor().insertRows('Report', 4).edit(blob(tpl)));
     const rows = await read(out, 'Report');
     expect(rows.get(3)!.formulas?.[2]).toBe('B3*2');

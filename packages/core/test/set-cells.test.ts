@@ -85,7 +85,7 @@ describe('SheetEditor.setCells', () => {
 
   it('writes out shared formulas whose anchor was overwritten, and drops the calculation chain', async () => {
     // C3 anchors the shared formula B3*2 that C4 reuses; the file also has a calcChain
-    const tpl = new Uint8Array(readFileSync(new URL('../../pro/test/fixtures/openpyxl-template.xlsx', import.meta.url)));
+    const tpl = new Uint8Array(readFileSync(new URL('./fixtures/openpyxl-template.xlsx', import.meta.url)));
     const out = await bytesOf(new SheetEditor().setCells('Report', { C3: 0 }).edit(createBlobReader(new Blob([tpl]))));
     const rows = await read(out);
     expect(rows.find(r => r.r === 3)?.cells[2]).toBe(0);

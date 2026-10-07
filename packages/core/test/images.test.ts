@@ -86,7 +86,7 @@ describe('images', () => {
   });
 
   it('reads openpyxl pictures and skips charts', async () => {
-    const blob = new Blob([readFileSync(new URL('../../pro/test/fixtures/openpyxl-chart.xlsx', import.meta.url))]);
+    const blob = new Blob([readFileSync(new URL('./fixtures/openpyxl-chart.xlsx', import.meta.url))]);
     const back = await (await new SheetReader().parse(createBlobReader(blob))).getImages();
     expect(back).toEqual([{ data: png, at: 'A5', width: 40, height: 20, altText: 'Picture' }]);
   });
