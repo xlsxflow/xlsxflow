@@ -8,7 +8,7 @@ export { StyleEngine } from './core/style-engine';
 export { FormulaEngine } from './core/formula-engine';
 export { ConditionalFormatter } from './core/conditional-formatter';
 
-// Low-level building blocks (used by @sheetforge/pro)
+// Low-level building blocks (used by @xlsxflow/pro)
 export { readSharedStrings } from './core/index';
 export { ZipRandomAccessParser } from './core/zip-random-access';
 export { ZipStreamWriter } from './core/zip-stream-writer';
@@ -19,7 +19,7 @@ export {
 } from './core/utils';
 export { anchorXml, drawingPartXml, DRAWING_NS, type Placement } from './core/image';
 
-export const SheetForge = {
+export const XlsxFlow = {
   async readFile(filePath: string, options?: import('./core/index').ParseOptions) {
     const { createFileReader } = await import('./core/random-access');
     const { SheetReader } = await import('./core/index');

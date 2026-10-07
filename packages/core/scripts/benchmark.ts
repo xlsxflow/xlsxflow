@@ -93,7 +93,7 @@ function printResult(r: ScenarioResult) {
 
 async function runBenchmark() {
   console.log('================================================================');
-  console.log('  SheetForge Benchmark Suite — 1 Million Cells');
+  console.log('  XlsxFlow Benchmark Suite — 1 Million Cells');
   console.log(`  Node: ${process.version}`);
   console.log('================================================================');
 

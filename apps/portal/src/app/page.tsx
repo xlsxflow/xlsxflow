@@ -2,8 +2,8 @@
 
 import { useState, useCallback, useRef } from "react";
 import { validateOrderAndGenerateLicense } from "./actions";
-import { SheetReader, SheetWriter, createBlobReader } from "@sheetforge/core";
-import type { Row } from "@sheetforge/core";
+import { SheetReader, SheetWriter, createBlobReader } from "@xlsxflow/core";
+import type { Row } from "@xlsxflow/core";
 
 type CellValue = string | number | boolean | null;
 
@@ -44,7 +44,7 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sheetforge-license.txt';
+    a.download = 'xlsxflow-license.txt';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -97,9 +97,9 @@ export default function Home() {
       [{ value: 'Product', style: { font: { bold: true, color: 'FFFFFFFF' }, fill: { type: 'solid' as const, fgColor: 'FF1e3a5f' } } },
        { value: 'Revenue', style: { font: { bold: true, color: 'FFFFFFFF' }, fill: { type: 'solid' as const, fgColor: 'FF1e3a5f' } } },
        { value: 'Units', style: { font: { bold: true, color: 'FFFFFFFF' }, fill: { type: 'solid' as const, fgColor: 'FF1e3a5f' } } }],
-      ['SheetForge Core', 15000, 3000],
-      ['SheetForge Pro', 42000, 8400],
-      ['SheetForge Enterprise', 98000, 4900],
+      ['XlsxFlow Core', 15000, 3000],
+      ['XlsxFlow Pro', 42000, 8400],
+      ['XlsxFlow Enterprise', 98000, 4900],
       [{ value: 'Total', style: { font: { bold: true } } },
        { value: null, formula: '=SUM(B2:B4)' },
        { value: null, formula: '=SUM(C2:C4)' }],
@@ -117,7 +117,7 @@ export default function Home() {
     writer.addSheet('Metadata', [
       ['Property', 'Value'],
       ['Generated On', { value: todayExcel, style: { numFmt: 'yyyy-mm-dd hh:mm:ss' } }],
-      ['Generator', 'SheetForge v1.0.0']
+      ['Generator', 'XlsxFlow v1.0.0']
     ], { columnWidths: [20, 30] });
 
     const bytes = await new Response(writer.write()).arrayBuffer();
@@ -125,7 +125,7 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sheetforge-demo.xlsx';
+    a.download = 'xlsxflow-demo.xlsx';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -137,7 +137,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center font-black text-xl shadow-lg shadow-cyan-500/30">S</div>
-            <span className="text-xl font-bold tracking-tight">SheetForge <span className="text-cyan-400">Portal</span></span>
+            <span className="text-xl font-bold tracking-tight">XlsxFlow <span className="text-cyan-400">Portal</span></span>
           </div>
           <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-400">
             <a href="#license" className="hover:text-white transition-colors">License</a>
@@ -205,7 +205,7 @@ export default function Home() {
                 <pre className="bg-slate-950 border border-slate-800 rounded-xl p-4 text-xs text-emerald-400 font-mono whitespace-pre-wrap break-all max-h-48 scrollbar-thin">
                   {license}
                 </pre>
-                <p className="text-xs text-slate-600">Activate with <code className="text-slate-400">await setLicenseKey(process.env.SHEETFORGE_LICENSE)</code> from <code className="text-slate-400">@sheetforge/pro</code>.</p>
+                <p className="text-xs text-slate-600">Activate with <code className="text-slate-400">await setLicenseKey(process.env.XLSXFLOW_LICENSE)</code> from <code className="text-slate-400">@xlsxflow/pro</code>.</p>
               </div>
             )}
           </div>
@@ -291,7 +291,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t border-slate-800 py-8 text-center text-slate-600 text-xs">
-        SheetForge · MIT Core / $5 PPP Pro · Built on ECMA-376 Open XML Standard
+        XlsxFlow · MIT Core / $5 PPP Pro · Built on ECMA-376 Open XML Standard
       </footer>
     </div>
   );

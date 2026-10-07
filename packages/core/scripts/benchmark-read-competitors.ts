@@ -1,6 +1,6 @@
 // Read benchmark: each library reads the same realistic file in its own process.
 //   pnpm build && npx tsx scripts/benchmark-read-competitors.ts
-// The file is written by ExcelJS (shared strings, numbers, dates, booleans), not by SheetForge,
+// The file is written by ExcelJS (shared strings, numbers, dates, booleans), not by XlsxFlow,
 // so no library reads its own output. Memory is peak RSS of the worker process, which is fair
 // for both streaming and in-memory readers (post-GC heap would hide an in-memory reader's peak).
 import * as fs from 'fs';
@@ -13,7 +13,7 @@ const COLS = 10;
 const SCRIPTS_DIR = path.join(process.cwd(), 'scripts');
 const TEST_FILE = path.join(SCRIPTS_DIR, `bench-read-mixed-${ROWS}.xlsx`);
 const WORKER = path.join(SCRIPTS_DIR, 'worker-read.mjs');
-const LIBRARIES = ['sheetforge', 'exceljs-stream', 'exceljs', 'xlsx'];
+const LIBRARIES = ['xlsxflow', 'exceljs-stream', 'exceljs', 'xlsx'];
 const require = createRequire(path.join(SCRIPTS_DIR, 'competitors', 'package.json'));
 
 async function prepareTestFile() {
@@ -38,7 +38,7 @@ const require = createRequire(${JSON.stringify(path.join(SCRIPTS_DIR, 'competito
 const [lib, file] = process.argv.slice(2);
 const t0 = performance.now();
 let rows = 0, cells = 0;
-if (lib === 'sheetforge') {
+if (lib === 'xlsxflow') {
   const { SheetReader, createFileReader } = await import(${JSON.stringify(new URL('../dist/index.mjs', 'file:///' + SCRIPTS_DIR.replace(/\\\\/g, '/') + '/').href)});
   for await (const row of await new SheetReader().parse(await createFileReader(file))) { rows++; cells += row.cells.length; }
 } else if (lib === 'exceljs-stream') {

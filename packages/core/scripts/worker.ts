@@ -27,7 +27,7 @@ async function run() {
 
   const tStart = performance.now();
 
-  if (lib === 'sheetforge') {
+  if (lib === 'xlsxflow') {
     const { SheetWriter } = await import('../src/core/writer.ts');
     const writer = new SheetWriter();
     async function* gen() { for (let r=0; r<rows; r++) yield generateRow(r); }

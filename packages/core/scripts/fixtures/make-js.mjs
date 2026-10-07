@@ -64,7 +64,7 @@ const mixed = [
   (await import('fs')).writeFileSync(path.join(FIX, 'xlsx-populate.expected.json'), JSON.stringify(expected));
 }
 
-// SheetForge's own writer: styles, formulas, merges, AsyncIterable rows
+// XlsxFlow's own writer: styles, formulas, merges, AsyncIterable rows
 {
   const { SheetWriter } = await import('../../src/index.ts').catch(() => import('../../dist/index.mjs'));
   const fs = await import('fs');
@@ -72,6 +72,6 @@ const mixed = [
   w.addSheet('Types', [...mixed, [{ value: null, formula: 'B1*2' }, { value: 'styled', style: { font: { bold: true } } }]], { mergeCells: ['A6:B6'] });
   w.addSheet('Dates', [[{ value: 45351.75, style: { numFmt: 'yyyy-mm-dd hh:mm' } }]]);
   w.addSheet('Bulk', (async function* () { yield* bulk; })());
-  fs.writeFileSync(path.join(FIX, 'sheetforge.xlsx'), new Uint8Array(await new Response(w.write()).arrayBuffer()));
+  fs.writeFileSync(path.join(FIX, 'xlsxflow.xlsx'), new Uint8Array(await new Response(w.write()).arrayBuffer()));
 }
 console.log('JS fixtures written');

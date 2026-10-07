@@ -3,7 +3,7 @@
   python scripts/fixtures/make-fixtures.py            # openpyxl + hand-crafted fixtures, then oracles
   python scripts/fixtures/make-fixtures.py --oracle   # only (re)write oracles for every .xlsx lacking a crafted one
 
-Oracle: openpyxl reads each file; values are normalized to SheetForge's conventions:
+Oracle: openpyxl reads each file; values are normalized to XlsxFlow's conventions:
 dates/times -> ISO-8601 UTC strings (Excel serial semantics, see iso()), errors -> '#DIV/0!' etc.,
 trailing empty cells trimmed, empty rows dropped. Crafted fixtures carry hand-written expectations.
 Requires: pip install openpyxl
@@ -25,7 +25,7 @@ FIX = Path(__file__).resolve().parents[2] / 'test' / 'fixtures'
 # ---------- normalization shared by the oracle and crafted expectations ----------
 
 def iso(serial: float, is1904: bool) -> str:
-    """Excel serial -> ISO string, matching SheetForge: 1900 leap-year bug honoured, ms precision."""
+    """Excel serial -> ISO string, matching XlsxFlow: 1900 leap-year bug honoured, ms precision."""
     days = int(serial // 1)
     ms = round((serial - days) * 86400000)
     if is1904:

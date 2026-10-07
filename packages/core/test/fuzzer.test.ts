@@ -3,7 +3,7 @@ import { SheetReader } from '../src/core/index';
 import { createXmlStreamParser } from '../src/core/xml-stream';
 import { parseWorksheet } from '../src/core/worksheet-parser';
 
-describe('SheetForge Fuzzer and Security', () => {
+describe('XlsxFlow Fuzzer and Security', () => {
   it('xml parser should not crash on incomplete tags', async () => {
     const garbageXml = new TextEncoder().encode('<worksheet><sheetData><row><c t="inlineStr"><is><t>Hello');
     const stream = new ReadableStream({

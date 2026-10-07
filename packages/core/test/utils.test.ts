@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { sheetToJson, streamToCsv } from '../src/core/utils';
 import { SheetWriter } from '../src/core/writer';
-import { SheetForge } from '../src/index';
+import { XlsxFlow } from '../src/index';
 import { createBlobReader, RandomAccessReader } from '../src/core/random-access';
 import { ZipRandomAccessParser } from '../src/core/zip-random-access';
 

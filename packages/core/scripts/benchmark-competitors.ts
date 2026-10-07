@@ -18,7 +18,7 @@ const ROWS_FALLBACK = 10_000;
 const COLS = 10;
 
 const LIBRARIES = [
-  'sheetforge',
+  'xlsxflow',
   'xlsx',
   'exceljs',
   'excel4node',
@@ -60,7 +60,7 @@ async function run() {
 
   const tStart = performance.now();
 
-  if (lib === 'sheetforge') {
+  if (lib === 'xlsxflow') {
     const { SheetWriter } = await import('../dist/index.mjs');
     const writer = new SheetWriter();
     async function* gen() { for (let r=0; r<rows; r++) yield generateRow(r); }

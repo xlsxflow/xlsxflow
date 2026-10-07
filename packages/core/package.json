@@ -1,5 +1,5 @@
 {
-  "name": "@sheetforge/core",
+  "name": "@xlsxflow/core",
   "version": "1.0.0",
   "description": "Streaming, zero-dependency .xlsx reader and writer for Node, browsers and Edge runtimes",
   "license": "MIT",

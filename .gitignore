@@ -9,5 +9,5 @@ dist/
 bench-*.xlsx
 benchmark-*.xlsx
 test-xml.xlsx
-packages/sheetforge/scripts/worker.js
-packages/sheetforge/README.md
+packages/core/scripts/worker.js
+packages/core/README.md

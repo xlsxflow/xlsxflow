@@ -1,9 +1,9 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/SheetForge/SheetForge/main/assets/logo.png" alt="SheetForge" width="200" />
-  <h1>SheetForge</h1>
+  <img src="https://raw.githubusercontent.com/xlsxflow/xlsxflow/main/assets/logo.png" alt="XlsxFlow" width="200" />
+  <h1>XlsxFlow</h1>
   <p><strong>The modern, streaming Excel engine for the web.</strong></p>
   
-  [![npm version](https://img.shields.io/npm/v/@sheetforge/core.svg?style=flat-square)](https://www.npmjs.com/package/@sheetforge/core)
+  [![npm version](https://img.shields.io/npm/v/@xlsxflow/core.svg?style=flat-square)](https://www.npmjs.com/package/@xlsxflow/core)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
   [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
@@ -18,9 +18,9 @@
 
 ---
 
-**SheetForge** is a zero-dependency, ultra-fast streaming parser and writer for OpenXML (`.xlsx`) files. Built on native Web APIs (like `TransformStream` and Web Crypto), it handles millions of cells with a completely flat memory profile.
+**XlsxFlow** is a zero-dependency, ultra-fast streaming parser and writer for OpenXML (`.xlsx`) files. Built on native Web APIs (like `TransformStream` and Web Crypto), it handles millions of cells with a completely flat memory profile.
 
-Unlike DOM-based AST parsers (like ExcelJS or SheetJS), SheetForge processes files chunk-by-chunk on the fly, making it perfect for Edge environments (Cloudflare Workers, Vercel Edge, Next.js Server Actions) and client-side browser usage without crashing the heap.
+Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files chunk-by-chunk on the fly, making it perfect for Edge environments (Cloudflare Workers, Vercel Edge, Next.js Server Actions) and client-side browser usage without crashing the heap.
 
 ## ✨ Features
 
@@ -34,13 +34,13 @@ Unlike DOM-based AST parsers (like ExcelJS or SheetJS), SheetForge processes fil
 
 ```bash
 # npm
-npm install @sheetforge/core
+npm install @xlsxflow/core
 
 # pnpm
-pnpm add @sheetforge/core
+pnpm add @xlsxflow/core
 
 # yarn
-yarn add @sheetforge/core
+yarn add @xlsxflow/core
 ```
 
 ## 🚀 Quick Start
@@ -48,7 +48,7 @@ yarn add @sheetforge/core
 ### Parsing an Excel File (Streaming)
 
 ```typescript
-import { SheetReader, createBlobReader } from '@sheetforge/core';
+import { SheetReader, createBlobReader } from '@xlsxflow/core';
 
 // Browser / Edge: any Blob or File (e.g. from <input type="file">)
 const blob = await fetch('https://example.com/massive-data.xlsx').then(r => r.blob());
@@ -77,9 +77,9 @@ Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB unco
 In Node.js, read straight from disk:
 
 ```typescript
-import { SheetForge } from '@sheetforge/core';
+import { XlsxFlow } from '@xlsxflow/core';
 
-for await (const row of await SheetForge.readFile('./data.xlsx')) {
+for await (const row of await XlsxFlow.readFile('./data.xlsx')) {
   console.log(row.cells);
 }
 ```
@@ -87,7 +87,7 @@ for await (const row of await SheetForge.readFile('./data.xlsx')) {
 ### Writing an Excel File
 
 ```typescript
-import { SheetWriter } from '@sheetforge/core';
+import { SheetWriter } from '@xlsxflow/core';
 
 const writer = new SheetWriter();
 
@@ -106,7 +106,7 @@ Rows can also be an `AsyncIterable<Row>`, so millions of rows can be generated l
 ### Appending to an Existing File
 
 ```typescript
-import { SheetEditor, createBlobReader } from '@sheetforge/core';
+import { SheetEditor, createBlobReader } from '@xlsxflow/core';
 
 const editor = new SheetEditor();
 editor.appendSheet('Sheet1', [['new', 'row']]); // appended after the last existing row
@@ -116,7 +116,7 @@ const edited = editor.edit(createBlobReader(existingBlob)); // ReadableStream<Ui
 ## Styles, Formulas & Conditional Formats
 
 ```typescript
-import { SheetWriter } from '@sheetforge/core';
+import { SheetWriter } from '@xlsxflow/core';
 
 const writer = new SheetWriter();
 writer.addSheet('Sales', [
@@ -141,11 +141,11 @@ Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedSt
 
 ## 📊 Benchmarks
 
-Write benchmark: 100,000 rows × 10 numeric columns (1M cells). Each library ran in its own process on Node v25.8.2, and "Heap" is the growth in heap usage. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/sheetforge`, after `pnpm build`).
+Write benchmark: 100,000 rows × 10 numeric columns (1M cells). Each library ran in its own process on Node v25.8.2, and "Heap" is the growth in heap usage. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`).
 
 | Library | Write Time | File Size | Heap |
 |---|---|---|---|
-| **SheetForge** | **1,641 ms** | **2.9 MB** | **+1 MB** |
+| **XlsxFlow** | **1,641 ms** | **2.9 MB** | **+1 MB** |
 | SheetJS (`xlsx`) | 3,610 ms | 31.4 MB | +170 MB |
 | xlsx-populate | 7,039 ms | 2.9 MB | +114 MB |
 | ExcelJS (streaming writer) | 13,458 ms | 3.0 MB | +9 MB |
@@ -159,7 +159,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 | Library | Read Time | Peak RSS |
 |---|---|---|
-| **SheetForge** | **2,446 ms** | **92 MB** |
+| **XlsxFlow** | **2,446 ms** | **92 MB** |
 | ExcelJS (streaming reader) | 3,235 ms | 265 MB |
 | ExcelJS | 4,637 ms | 661 MB |
 | SheetJS (`xlsx`) | 6,434 ms | 551 MB |
@@ -170,6 +170,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ### Unreleased
 
+- **Renamed:** SheetForge is now XlsxFlow. Packages are `@xlsxflow/core` and `@xlsxflow/pro`, and `SheetForge.readFile` is `XlsxFlow.readFile`.
 - **Fixed: reader dropped/corrupted cells at stream chunk boundaries** (the XML tokenizer discarded buffered characters between chunks). Large files from ExcelJS/SheetJS now read back exactly.
 - **Fixed: styles pointed at the wrong font/fill/border** (off-by-one against the default entries), and styles used by `AsyncIterable` rows were missing from `styles.xml`.
 - **Real backpressure** in the ZIP writer and worksheet stream; producer errors now error the output stream instead of hanging it.
@@ -177,7 +178,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 - Reader resolves sheets from `workbook.xml` (first tab by default, absolute targets, any attribute order).
 - `SheetEditor`: handles empty `<sheetData/>`, copies untouched entries without recompressing, errors on unknown sheet names; now exported.
 - Formula cached values keep their type; aggregates ignore text/blanks like Excel; formulas evaluate against their own sheet.
-- Styles, formulas and conditional formatting are part of the MIT core (moved out of `src/pro`). Licensing code moved to a separate, unpublished `@sheetforge/pro` package.
+- Styles, formulas and conditional formatting are part of the MIT core (moved out of `src/pro`). Licensing code moved to a separate, unpublished `@xlsxflow/pro` package.
 - npm package now ships compiled ESM + CJS builds with bundled type declarations instead of TypeScript source.
 - Browser bundles no longer try to resolve Node `fs`.
 - **Fixed: numbers shown as dates.** Number formats with quoted text, escapes or colours (`#,##0.00 "USD"`, `0 "days"`, `[Red]0.0`) were detected as date formats, so their values were returned as dates.
@@ -200,7 +201,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 - **Fixed: files Excel would repair:** gradient fills were written as `<gradientStop>` (the element is `<stop>`), `vertical: 'middle'` was written verbatim (OOXML says `center`), and conditional formatting came after data validation (schema order is the other way round).
 - Fixed: `minValue`/`maxValue` on data bars were ignored; every conditional format had priority 1; colours and ranges were not XML-escaped.
 - Fixed: strings containing `_xHHHH_`, control characters or CR, or leading/trailing spaces, now survive a write/read round trip. `NaN`/`Infinity` are written as `#NUM!` instead of an invalid cell.
-- Test corpus: fixtures from openpyxl, ExcelJS, SheetJS, xlsx-populate, SheetForge, plus hand-crafted edge cases, checked against an openpyxl oracle. Also a fuzz suite for corrupted ZIPs and hostile XML.
+- Test corpus: fixtures from openpyxl, ExcelJS, SheetJS, xlsx-populate, XlsxFlow, plus hand-crafted edge cases, checked against an openpyxl oracle. Also a fuzz suite for corrupted ZIPs and hostile XML.
 
 ### v1.0.0 (Official Release)
 > True O(1) Streaming Architecture for Writers & Editors
@@ -263,7 +264,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ## 📄 License
 
-`@sheetforge/core` is licensed under the [MIT License](packages/sheetforge/LICENSE). A commercial `@sheetforge/pro` add-on is planned; it will be a separate package under its own license and never changes the terms of the core.
+`@xlsxflow/core` is licensed under the [MIT License](packages/core/LICENSE). A commercial `@xlsxflow/pro` add-on is planned; it will be a separate package under its own license and never changes the terms of the core.
 
 ---
 <div align="center">

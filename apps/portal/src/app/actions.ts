@@ -33,7 +33,7 @@ export async function validateOrderAndGenerateLicense(orderId: string) {
       throw new Error("POLAR_PRODUCT_ID is missing on the server.");
     }
     if (orderData.product_id !== expectedProductId) {
-      throw new Error("Invalid Product: This order ID is not for the SheetForge Pro license.");
+      throw new Error("Invalid Product: This order ID is not for the XlsxFlow Pro license.");
     }
     if (orderData.status !== "paid") {
       throw new Error(`Order is ${orderData.status ?? "not paid"}.`);
