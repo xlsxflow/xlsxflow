@@ -1,9 +1,10 @@
-import { Row, StyledCell, CellValue, SheetOptions } from './types';
+import { Row, StyledCell, CellValue, SheetOptions, SheetImage } from './types';
 import { StyleEngine, fontXml } from './style-engine';
 import { ConditionalFormatter } from './conditional-formatter';
 import { FormulaEngine } from './formula-engine';
 import { ZipStreamWriter } from './zip-stream-writer';
 import { encodeXString, colLetter, dateToSerial } from './utils';
+import { imageInfo, drawingXml, type ImageInfo } from './image';
 
 function escapeXml(val: string): string {
   return val
@@ -44,6 +45,8 @@ export class SheetWriter {
   private sheets: { name: string; rows: Row[] | AsyncIterable<Row>; options: SheetOptions }[] = [];
   private sharedStrings = new Map<string, number>();
   private sharedStringRefs = 0;
+  // Embedded pictures by their data object, so a logo used on every sheet is stored once
+  private media = new Map<Uint8Array | ArrayBuffer, { path: string; bytes: Uint8Array; info: ImageInfo }>();
 
   constructor(private writerOptions: WriterOptions = {}) {}
 
@@ -62,6 +65,13 @@ export class SheetWriter {
     }
 
     const zip = new ZipStreamWriter();
+    for (const img of this.sheets.flatMap(s => s.options.images ?? [])) {
+      if (this.media.has(img.data)) continue;
+      const bytes = img.data instanceof Uint8Array ? img.data : new Uint8Array(img.data);
+      const info = imageInfo(bytes);
+      this.media.set(img.data, { path: `media/image${this.media.size + 1}.${info.ext}`, bytes, info });
+    }
+    let drawings = 0;
 
     // Push the build process to background so we can return the stream immediately
     (async () => {
@@ -84,7 +94,10 @@ export class SheetWriter {
           }
           const links: string[] = [];
           await zip.addFile(`xl/worksheets/sheet${i + 1}.xml`, this.buildWorksheetXmlStream(sheet.rows, sheet.options, links));
-          if (links.length) await this.streamString(zip, `xl/worksheets/_rels/sheet${i + 1}.xml.rels`, this.buildSheetRels(links));
+          const images = sheet.options.images ?? [];
+          const drawing = images.length ? ++drawings : 0;
+          if (links.length || drawing) await this.streamString(zip, `xl/worksheets/_rels/sheet${i + 1}.xml.rels`, this.buildSheetRels(links, drawing));
+          if (drawing) await this.writeDrawing(zip, drawing, images);
         }
 
         // styles.xml goes last: streamed (AsyncIterable) rows register styles while being written.
@@ -92,6 +105,9 @@ export class SheetWriter {
         await this.streamString(zip, 'xl/sharedStrings.xml', this.buildSharedStringsXml());
         await this.streamString(zip, 'xl/styles.xml', this.styleEngine.toXml());
 
+        for (const { path, bytes } of this.media.values()) {
+          await zip.addFile(`xl/${path}`, new ReadableStream({ start(c) { c.enqueue(bytes); c.close(); } }));
+        }
         await zip.close();
       } catch (err) {
         zip.error(err);
@@ -99,6 +115,21 @@ export class SheetWriter {
     })();
 
     return zip.stream;
+  }
+
+  private async writeDrawing(zip: ZipStreamWriter, n: number, images: SheetImage[]) {
+    const targets: string[] = [];
+    const rIds = images.map(img => {
+      const target = `../${this.media.get(img.data)!.path}`;
+      let k = targets.indexOf(target);
+      if (k < 0) k = targets.push(target) - 1;
+      return `rId${k + 1}`;
+    });
+    await this.streamString(zip, `xl/drawings/drawing${n}.xml`, drawingXml(images, images.map(img => this.media.get(img.data)!.info), rIds));
+    const rels = targets.map((t, k) =>
+      `<Relationship Id="rId${k + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${t}"/>`).join('');
+    await this.streamString(zip, `xl/drawings/_rels/drawing${n}.xml.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`);
   }
 
   private applyAutoFit(rows: Row[], options: SheetOptions) {
@@ -287,6 +318,7 @@ export class SheetWriter {
     }
 
     if (hyperlinks.length) footer += `  <hyperlinks>${hyperlinks.join('')}</hyperlinks>\n`;
+    if (options.images?.length) footer += `  <drawing r:id="rIdDrawing"/>\n`;
 
     footer += `</worksheet>`;
     yield footer;
@@ -300,10 +332,11 @@ export class SheetWriter {
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${this.sharedStringRefs}" uniqueCount="${this.sharedStrings.size}">${items}</sst>`;
   }
 
-  private buildSheetRels(links: string[]): string {
-    const rels = links.map((target, i) =>
+  private buildSheetRels(links: string[], drawing: number): string {
+    let rels = links.map((target, i) =>
       `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${escapeXml(target)}" TargetMode="External"/>`
     ).join('');
+    if (drawing) rels += `<Relationship Id="rIdDrawing" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawing}.xml"/>`;
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`;
   }
@@ -354,11 +387,16 @@ export class SheetWriter {
     const sheetOverrides = this.sheets.map((_, i) => 
       `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
     ).join('\n  ');
+    const exts = new Set([...this.media.values()].map(m => m.info.ext));
+    const imageTypes = [...exts].map(e => `<Default Extension="${e}" ContentType="image/${e}"/>`).join('');
+    const drawingOverrides = this.sheets.filter(s => s.options.images?.length).map((_, i) =>
+      `<Override PartName="/xl/drawings/drawing${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`).join('');
 
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  ${imageTypes}${drawingOverrides}
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   ${sheetOverrides}
   <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>

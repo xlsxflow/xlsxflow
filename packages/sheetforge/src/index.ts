@@ -3,7 +3,7 @@ export { SheetEditor } from './core/editor';
 export { SheetWriter, type WriterOptions } from './core/writer';
 export { createXmlStreamParser } from './core/xml-stream';
 export { parseWorksheet, type RowData, type SheetMetadata } from './core/worksheet-parser';
-export type { CellValue, StyledCell, Row, CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, BorderSide, RichTextRun, SheetOptions, ConditionalFormat, DataValidation } from './core/types';
+export type { CellValue, StyledCell, Row, CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, BorderSide, RichTextRun, SheetOptions, SheetImage, ConditionalFormat, DataValidation } from './core/types';
 export { StyleEngine } from './core/style-engine';
 export { FormulaEngine } from './core/formula-engine';
 export { ConditionalFormatter } from './core/conditional-formatter';

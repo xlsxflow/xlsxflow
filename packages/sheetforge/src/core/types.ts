@@ -107,4 +107,15 @@ export interface SheetOptions {
   autoFitColumns?: boolean;
   freezePanes?: { row?: number, col?: number };
   autoFilter?: string; // e.g. "A1:D1"
+  images?: SheetImage[];
 }
+
+// A PNG, JPEG or GIF picture (format detected from the bytes). Passing the same `data` object
+// to several images stores the file once.
+export type SheetImage = {
+  data: Uint8Array | ArrayBuffer;
+  altText?: string;
+} & (
+  | { range: string }                                // stretched over cells, e.g. "B2:D8"
+  | { at: string; width?: number; height?: number }  // top-left cell; size in pixels, default the image's own
+);

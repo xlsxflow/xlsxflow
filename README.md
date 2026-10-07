@@ -28,7 +28,7 @@ Unlike DOM-based AST parsers (like ExcelJS or SheetJS), SheetForge processes fil
 - **True Streaming**: Parse gigabytes of Excel data using `ReadableStream` with almost zero memory overhead.
 - **Edge Native**: Fully compatible with Node.js, Deno, Bun, Cloudflare Workers, and modern browsers.
 - **Read & Write**: Stream massive `.xlsx` files and generate them on the fly.
-- **Styles & Formulas**: Fonts, fills, borders, alignment, number formats, data bars / color scales, cached formula results, dates, hyperlinks and autofilters. Read formulas and styles back. All MIT, all free.
+- **Styles & Formulas**: Fonts, fills, borders, alignment, number formats, data bars / color scales, cached formula results, dates, hyperlinks, autofilters and images. Read formulas and styles back. All MIT, all free.
 
 ## 📦 Installation
 
@@ -130,6 +130,10 @@ writer.addSheet('Sales', [
   freezePanes: { row: 1 },
   autoFilter: 'A1:B1',
   conditionalFormats: [{ range: 'A2:A3', rule: { type: 'dataBar', color: 'FF06B6D4' } }],
+  images: [
+    { data: logoPng, at: 'D1', height: 40 },               // PNG/JPEG/GIF bytes; width follows the aspect ratio
+    { data: chartJpeg, range: 'D4:H14', altText: 'Trend' }, // stretched over the cells
+  ],
 });
 ```
 
@@ -188,6 +192,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
   - Time-only values are no longer a day off, and datetimes keep millisecond precision.
 - **New:** `Date` cell values, hyperlinks (URLs and in-workbook locations), `autoFilter`, and an opt-in shared string table on write. Reading can return formulas (`formulas: true`, shared formulas expanded) and styles (`styles: true`).
 - **New:** rich text runs on write (`richText`) and read (`richText: true`); hyperlinks read back via `getMetadata()`; theme and indexed colours (with tints, and the workbook's own palette) resolved to ARGB when reading styles.
+- **New:** embedded PNG/JPEG/GIF images (`images` sheet option), anchored to a cell at their own size or stretched over a range. Format and size come from the file header; data shared between sheets is stored once.
 - Low-level building blocks are exported for add-ons: the ZIP reader and writer, `resolveWorkbookParts`, `readSharedStrings`, and `mapFormulaRefs`/`shiftFormula` (A1 reference rewriting that understands sheet qualifiers).
 - The formula engine understands `$A$1` references and no longer logs to the console for formulas it cannot evaluate.
 - **New:** 1 GiB default size cap on in-memory parts when reading (zip-bomb guard).
