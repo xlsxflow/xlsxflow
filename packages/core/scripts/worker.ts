@@ -65,7 +65,7 @@ async function run() {
     for (let r=0; r<rows; r++) {
       data.push(generateRow(r).map((v: any) => ({ type: Number, value: v })));
     }
-    await writeXlsxFile(data, { filePath: filepath });
+    await writeXlsxFile(data).toFile(filepath); // v4 API
   } else if (lib === 'xlsx-populate') {
     const XlsxPopulate = require('./competitors/node_modules/xlsx-populate');
     const wb = await XlsxPopulate.fromBlankAsync();

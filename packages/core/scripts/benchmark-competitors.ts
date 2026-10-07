@@ -17,7 +17,8 @@ const ROWS_FULL = 100_000;
 const ROWS_FALLBACK = 10_000;
 const COLS = 10;
 
-const LIBRARIES = [
+// BENCH_LIBS=xlsxflow,exceljs runs a subset
+const LIBRARIES = process.env.BENCH_LIBS ? process.env.BENCH_LIBS.split(',') : [
   'xlsxflow',
   'xlsx',
   'exceljs',
@@ -104,7 +105,7 @@ async function run() {
     for (let r=0; r<rows; r++) {
       data.push(generateRow(r).map((v) => ({ type: Number, value: v })));
     }
-    await writeXlsxFile(data, { filePath: filepath });
+    await writeXlsxFile(data).toFile(filepath); // v4 API
   } else if (lib === 'xlsx-populate') {
     const XlsxPopulate = require('./competitors/node_modules/xlsx-populate');
     const wb = await XlsxPopulate.fromBlankAsync();
@@ -160,11 +161,11 @@ async function runWorker(lib: string, rows: number): Promise<BenchResult> {
     p.stderr.on('data', (d: any) => err += d.toString());
 
     p.on('close', (code: number | null) => {
-      if (code !== 0 || err.includes('FATAL ERROR') || err.includes('heap out of memory')) {
-        if (!err.includes('FATAL ERROR') && !err.includes('heap out of memory')) {
-          console.error(`Worker error (${lib}):`, err.slice(0, 500));
-        }
-        resolve({ name: lib, rows, oom: true, error: 'OOM / Crash' });
+      const oom = err.includes('FATAL ERROR') || err.includes('heap out of memory');
+      if (code !== 0 || oom) {
+        // Only a real out-of-memory crash is reported as OOM; other failures are errors
+        if (!oom) console.error(`Worker error (${lib}):`, err.slice(0, 500));
+        resolve({ name: lib, rows, oom, error: oom ? 'OOM' : 'Failed: ' + (err.trim().split('\n')[0] || `exit ${code}`).trim().slice(0, 60) });
         return;
       }
       try {
@@ -190,7 +191,10 @@ async function run() {
     console.log(`Testing ${lib} (100,000 rows, 1M cells)...`);
     let res = await runWorker(lib, ROWS_FULL);
     
-    if (res.oom) {
+    if (res.error && !res.oom) {
+      console.log(`  -> ${res.error}`);
+      results.push(res);
+    } else if (res.oom) {
       console.log(`  -> OOM crashed on 100k rows! Falling back to 10k rows...`);
       const fallback = await runWorker(lib, ROWS_FALLBACK);
       fallback.error = '100k OOM (tested 10k)';

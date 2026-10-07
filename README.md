@@ -141,28 +141,28 @@ Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedSt
 
 ## 📊 Benchmarks
 
-Write benchmark: 100,000 rows × 10 numeric columns (1M cells). Each library ran in its own process on Node v25.8.2, and "Heap" is the growth in heap usage. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`).
+Write benchmark: 100,000 rows × 10 numeric columns (1M cells). Each library ran in its own process on Node v25.8.2, and "Heap" is the growth in heap usage. Times are from one warm run; repeated runs of the top three varied by under 10%. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`; `BENCH_LIBS=xlsxflow,exceljs` runs a subset).
 
 | Library | Write Time | File Size | Heap |
 |---|---|---|---|
-| **XlsxFlow** | **1,641 ms** | **2.9 MB** | **+1 MB** |
-| SheetJS (`xlsx`) | 3,610 ms | 31.4 MB | +170 MB |
-| xlsx-populate | 7,039 ms | 2.9 MB | +114 MB |
-| ExcelJS (streaming writer) | 13,458 ms | 3.0 MB | +9 MB |
-| excel4node | 15,383 ms | 3.1 MB | +205 MB |
-| write-excel-file | out of memory at 100k rows | | |
-| msexcel-builder | out of memory at 100k rows | | |
+| **XlsxFlow** | **1,685 ms** | **2.9 MB** | **+1 MB** |
+| ExcelJS 4.4 (streaming writer) | 1,797 ms | 3.0 MB | +9 MB |
+| SheetJS (`xlsx` 0.18.5 from npm) | 3,228 ms | 31.4 MB | +170 MB |
+| write-excel-file | 4,313 ms | 2.8 MB | +2 MB |
+| xlsx-populate | 7,500 ms | 2.9 MB | +114 MB |
+| excel4node | 12,087 ms | 3.1 MB | +205 MB |
+| msexcel-builder | fails to run (`Invalid character in name: fileVersion`) | | |
 
 Rows are pulled from an async generator. The writer only generates rows as fast as the output stream is consumed, so memory stays flat as row count grows.
 
-Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers, dates, booleans; 6.4 MB). Every library reads every cell. "Peak RSS" is the peak memory of the reading process. Reproduce with `npx tsx scripts/benchmark-read-competitors.ts`.
+Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers, dates, booleans; 6.4 MB). Every library reads every cell. "Peak RSS" is the peak memory of the reading process. Median of three runs. Reproduce with `npx tsx scripts/benchmark-read-competitors.ts`.
 
 | Library | Read Time | Peak RSS |
 |---|---|---|
-| **XlsxFlow** | **2,446 ms** | **92 MB** |
-| ExcelJS (streaming reader) | 3,235 ms | 265 MB |
-| ExcelJS | 4,637 ms | 661 MB |
-| SheetJS (`xlsx`) | 6,434 ms | 551 MB |
+| **XlsxFlow** | **2,415 ms** | **92 MB** |
+| ExcelJS (streaming reader) | 3,010 ms | 267 MB |
+| ExcelJS | 4,227 ms | 660 MB |
+| SheetJS (`xlsx`) | 6,035 ms | 544 MB |
 
 ---
 
@@ -170,6 +170,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ### Unreleased
 
+- **Corrected benchmarks:** the earlier ExcelJS write time (13.5 s) came from a cold first run; warm, it is 1.8 s. write-excel-file was listed as running out of memory, but the harness used its old API and never ran it. Failures are now reported as failures, not out-of-memory.
 - **Renamed:** SheetForge is now XlsxFlow. Packages are `@xlsxflow/core` and `@xlsxflow/pro`, and `SheetForge.readFile` is `XlsxFlow.readFile`.
 - **Fixed: reader dropped/corrupted cells at stream chunk boundaries** (the XML tokenizer discarded buffered characters between chunks). Large files from ExcelJS/SheetJS now read back exactly.
 - **Fixed: styles pointed at the wrong font/fill/border** (off-by-one against the default entries), and styles used by `AsyncIterable` rows were missing from `styles.xml`.
