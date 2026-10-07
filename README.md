@@ -20,11 +20,11 @@
 
 ---
 
-**XlsxFlow** is a zero-dependency, ultra-fast streaming parser and writer for OpenXML (`.xlsx`) files. Built on native Web APIs (like `TransformStream` and Web Crypto), it handles millions of cells with a completely flat memory profile.
+**XlsxFlow** is a zero-dependency streaming reader, writer and editor for OpenXML (`.xlsx`) files. Built on native Web APIs (like `TransformStream` and Web Crypto), it handles millions of cells in flat memory.
 
-Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files chunk-by-chunk on the fly, making it perfect for Edge environments (Cloudflare Workers, Vercel Edge, Next.js Server Actions) and client-side browser usage without crashing the heap.
+Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files chunk-by-chunk on the fly, so it suits edge runtimes (Cloudflare Workers, Vercel Edge, Next.js Server Actions) and browsers.
 
-## ✨ Features
+## Features
 
 - **Zero Dependencies**: Pure modern TypeScript, leveraging native browser/Node Web APIs.
 - **True Streaming**: Parse gigabytes of Excel data using `ReadableStream` with almost zero memory overhead.
@@ -32,7 +32,7 @@ Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files
 - **Read & Write**: Stream massive `.xlsx` files and generate them on the fly.
 - **Styles & Formulas**: Fonts, fills, borders, alignment, number formats, data bars / color scales, cached formula results, dates, hyperlinks, autofilters and images. Read formulas and styles back. All MIT, all free.
 
-## 📦 Installation
+## Installation
 
 ```bash
 # npm
@@ -45,7 +45,7 @@ pnpm add @xlsxflow/core
 yarn add @xlsxflow/core
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Parsing an Excel File (Streaming)
 
@@ -192,7 +192,7 @@ writer.addSheet('Report', rows, {
 
 Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when values repeat, but the distinct strings stay in memory until the file is finished.
 
-## 📊 Benchmarks
+## Benchmarks
 
 Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 rows (10M cells). Each library ran in its own process on Node v25.8.2 with a 4 GB heap limit, and "Heap" is the growth in heap usage. Times are from one run on a laptop with other apps open; runs on that machine varied by up to 2×, so treat differences under about 20% as a tie. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`). `BENCH_ROWS=1000000` runs 10M cells, `BENCH_LIBS=xlsxflow,exceljs` runs a subset, and a library still writing after `BENCH_TIMEOUT_MIN` minutes (default 10) is stopped.
 
@@ -233,7 +233,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ---
 
-## 📋 Changelog
+## Changelog
 
 ### Unreleased
 
@@ -278,35 +278,34 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 ### v1.0.0 (Official Release)
 > True O(1) Streaming Architecture for Writers & Editors
 
-- **O(1) Memory Streaming Writer & Editor** — Ripped out in-memory buffers. `SheetWriter` and `SheetEditor` now use `ZipStreamWriter` via Data Descriptors (Bit 3) to generate dynamic ZIP archives entirely on-the-fly, reducing memory overhead to O(1) flat.
-- **Dynamic Date Deserialization** — Robust detection of `numFmtId` across workbooks to reliably auto-convert numeric epoch dates back into strict ISO-8601 strings during stream parsing.
-- **Data Descriptors & Signature Scanning** — Fixed limitations with forward-only zip stream parsers by scanning for Data Descriptor headers `0x08074b50`, achieving zero-seek streaming parsing of workbooks.
-- **Production Ready** — Validated by extensive tests and rigorous benchmarking.
+- **O(1) Memory Streaming Writer & Editor**: Removed the in-memory buffers. `SheetWriter` and `SheetEditor` now use `ZipStreamWriter` via Data Descriptors (Bit 3) to generate dynamic ZIP archives entirely on-the-fly, so memory stays flat.
+- **Dynamic Date Deserialization**: Detection of `numFmtId` across workbooks to convert numeric epoch dates back into strict ISO-8601 strings during stream parsing.
+- **Data Descriptors & Signature Scanning**: Fixed limitations with forward-only zip stream parsers by scanning for Data Descriptor headers `0x08074b50`, so workbooks parse without seeking.
 
 ---
 
 ### v0.3.0-beta
 > Multi-Sheet Support, Auto Date Deserialization, & Massive XML Parsing Optimization
 
-- **Multi-Sheet Writing** — You can now use `writer.addSheet()` multiple times to chain worksheets into a single exported `.xlsx` workbook.
-- **Dynamic XML Structuring** — The zip packer dynamically adjusts `[Content_Types].xml`, `workbook.xml`, and relationships files.
-- **Auto Date Deserialization** — `SheetReader` now pre-fetches `styles.xml` from the stream, parses `<cellXfs>` and `<numFmts>`, and heuristically identifies cells with date formats. Numeric Excel epoch dates are automatically mapped directly to strict `ISO-8601` strings!
-- **Exponential XML Stream Bug Fixed** — Found and eliminated an $O(N^2)$ buffer accumulation bug in `xml-stream.ts`. Reading 1 Million cells now parses fully in under ~4 seconds (down from ~6.4s) while consuming <60MB of peak heap overhead.
-- **Portal App Update** — The interactive `/apps/portal` demo now dynamically exports workbooks containing 2 distinct sheets and verified Date cells.
+- **Multi-Sheet Writing**: You can now use `writer.addSheet()` multiple times to chain worksheets into a single exported `.xlsx` workbook.
+- **Dynamic XML Structuring**: The zip packer dynamically adjusts `[Content_Types].xml`, `workbook.xml`, and relationships files.
+- **Auto Date Deserialization**: `SheetReader` now pre-fetches `styles.xml` from the stream, parses `<cellXfs>` and `<numFmts>`, and heuristically identifies cells with date formats. Numeric Excel dates are returned as `ISO-8601` strings.
+- **Quadratic XML stream bug fixed**: Fixed a buffer accumulation bug that made parsing O(n²) in `xml-stream.ts`. Reading 1 Million cells now parses fully in under ~4 seconds (down from ~6.4s) while consuming <60MB of peak heap overhead.
+- **Portal App Update**: The interactive `/apps/portal` demo now dynamically exports workbooks containing 2 distinct sheets and verified Date cells.
 
 ---
 
 ### v0.2.0-beta
 > Native Deflate Compression & Rich Text Support
 
-- **SheetWriter is now async** — `write()` returns `Promise<Uint8Array>`
-- **Native Deflate compression** via `CompressionStream('deflate-raw')` — no dependencies
-- **ZIP binary upgraded** — compression method `0x08`, correct uncompressed size & CRC-32 in headers
+- **SheetWriter is now async**: `write()` returns `Promise<Uint8Array>`
+- **Native Deflate compression** via `CompressionStream('deflate-raw')`, no dependencies
+- **ZIP binary upgraded**: compression method `0x08`, correct uncompressed size & CRC-32 in headers
 - **File size reduction**: 1M cell file went from **30 MB → 2.9 MB** (90% smaller)
 - **Read speed improved**: parse time dropped from **~9.4s → 6.4s** (less I/O from smaller file)
-- **Rich Text / Inline String support** — `SheetReader` now parses `<t>` inside `<is>` and `<r>` elements
+- **Rich Text / Inline String support**: `SheetReader` now parses `<t>` inside `<is>` and `<r>` elements
 - **Type fixes**: `@types/node` added, `TextDecoderStream` cast resolved
-- **ZIP backpressure deadlock** permanently fixed via concurrent background pump
+- **ZIP backpressure deadlock** fixed with a background pump
 
 #### v0.2.0-beta vs v0.1.0-beta comparison
 
@@ -315,9 +314,9 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 | File size (1M cells) | 30 MB | 2.9 MB | **−90%** |
 | Write time | ~3,600 ms | ~3,900 ms | ~+8% (compression overhead) |
 | Read time | ~9,400 ms | ~6,400 ms | **−32%** (less disk I/O) |
-| ZIP Compression | Store (none) | Deflate (native) | ✅ |
-| Async write API | ❌ sync | ✅ async | ✅ |
-| Rich text cells | ❌ | ✅ | ✅ |
+| ZIP compression | Store (none) | Deflate (native) | |
+| Write API | sync | async | |
+| Rich text cells | no | yes | |
 
 ---
 
@@ -334,11 +333,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ---
 
-## 📄 License
+## License
 
 `@xlsxflow/core` is licensed under the [MIT License](packages/core/LICENSE). A commercial `@xlsxflow/pro` add-on is planned; it will be a separate package under its own license and never changes the terms of the core.
 
----
-<div align="center">
-  Built with 💻 and ☕ for modern web developers.
-</div>

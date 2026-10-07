@@ -42,7 +42,7 @@ export function alignmentAttrs(alignment: CellAlignment): Record<string, string>
   return attrs;
 }
 
-// Registry of unique styles — maps to integer index for OOXML styleSheet
+// Registry of unique styles: maps to integer index for OOXML styleSheet
 interface StyleRegistry {
   fonts: Map<string, number>;
   fills: Map<string, number>;
