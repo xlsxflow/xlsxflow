@@ -1,6 +1,8 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/xlsxflow/xlsxflow/main/assets/logo.png" alt="XlsxFlow" width="200" />
-  <h1>XlsxFlow</h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/xlsxflow/xlsxflow/main/assets/logo-wordmark-dark.svg" />
+    <img src="https://raw.githubusercontent.com/xlsxflow/xlsxflow/main/assets/logo-wordmark.svg" alt="XlsxFlow" width="320" />
+  </picture>
   <p><strong>The modern, streaming Excel engine for the web.</strong></p>
   
   [![npm version](https://img.shields.io/npm/v/@xlsxflow/core.svg?style=flat-square)](https://www.npmjs.com/package/@xlsxflow/core)
