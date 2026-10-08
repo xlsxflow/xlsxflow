@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1
+
+- README: the XlsxFlow website address, and Pro at a flat $5.
+- More npm keywords: `xls` and `ods`.
+
 ## 1.1.0
 
 ### Added
