@@ -94,7 +94,9 @@ const NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmln
   + 'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
   + 'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0" '
   + 'xmlns:of="urn:oasis:names:tc:opendocument:xmlns:of:1.2" xmlns:dc="http://purl.org/dc/elements/1.1/" '
-  + 'xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0" office:version="1.3"';
+  + 'xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" xmlns:config="urn:oasis:names:tc:opendocument:xmlns:config:1.0" '
+  // LibreOffice resolves the ooo: prefix in "ooo:view-settings"; without it the frozen panes are ignored
+  + 'xmlns:ooo="http://openoffice.org/2004/office" office:version="1.3"';
 
 interface Sheet { name: string; rows: Row[] | AsyncIterable<Row>; options: OdsSheetOptions }
 

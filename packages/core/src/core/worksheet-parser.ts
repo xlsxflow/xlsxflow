@@ -283,7 +283,8 @@ export function parseWorksheet(
             } else if (token.name === 'mergeCell') {
               if (token.attributes['ref']) mergedCells.push(token.attributes['ref']);
             } else if (token.name === 'pane') {
-              if (token.attributes['state'] === 'frozen') {
+              // frozenSplit: frozen after being split, which Excel also writes
+              if (token.attributes['state'] === 'frozen' || token.attributes['state'] === 'frozenSplit') {
                 freezePanes = {
                   row: parseInt(token.attributes['ySplit'] || '0', 10),
                   col: parseInt(token.attributes['xSplit'] || '0', 10),

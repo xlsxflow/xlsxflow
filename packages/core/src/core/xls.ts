@@ -260,7 +260,7 @@ export class XlsWorkbook {
       if (!r) rows.set(row, r = { cells: [] });
       while (r.cells.length < col) r.cells.push(null);
       if (typeof value === 'number' && this.isDate(xf)) value = excelToIsoDate(value, this.date1904);
-      else if (value === -0) value = 0;
+      else if (Object.is(value, -0)) value = 0;
       r.cells[col] = value;
       if (formatted && value !== null) {
         (r.formatted ??= [])[col] = typeof value === 'string' && ERROR_TEXTS.has(value) && raw === undefined

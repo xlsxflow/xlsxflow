@@ -10,6 +10,7 @@ export const ODS_MIMETYPE = 'application/vnd.oasis.opendocument.spreadsheet';
 
 const MAX_ROWS = 1 << 20;
 const MAX_COLUMNS = 1 << 14;
+const ERROR_TEXT = /^#(NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A|GETTING_DATA|SPILL!|CALC!)$/;
 
 type TokenSource = () => Promise<ReadableStream<Uint8Array>>;
 
@@ -231,6 +232,8 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
               case 'float': case 'percentage': case 'currency': {
                 const n = Number(a['value']);
                 value = isNaN(n) ? shown || null : n === 0 ? 0 : n;
+                // Excel saves a formula error as the number 0 with the error as its text
+                if (a['formula'] && ERROR_TEXT.test(shown)) value = shown;
                 break;
               }
               case 'date': value = odsDate(a['date-value'] ?? '') ?? shown; break;
