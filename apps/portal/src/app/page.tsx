@@ -228,6 +228,15 @@ export default function Home() {
                 <li>Build servers and CI don&apos;t need their own key.</li>
                 <li>Full refund within 14 days if it doesn&apos;t work for you, processed by Polar.</li>
               </ul>
+              <div>
+                <h3 className="font-semibold mb-2">How it works</h3>
+                <ol className="flex flex-col gap-2 list-decimal pl-5 text-muted">
+                  <li>Install it: <code className="font-mono text-sm text-ink">npm install @xlsxflow/core @xlsxflow/pro</code></li>
+                  <li>Buy Pro. Polar emails you a receipt with your order ID.</li>
+                  <li>Enter the order ID and your email in <a href="#licence" className={`${link} text-ink`}>Get your licence key</a> below.</li>
+                  <li>Call <code className="font-mono text-sm text-ink">await setLicenseKey(key)</code> once at startup. Without a key, Pro functions throw an error.</li>
+                </ol>
+              </div>
               <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
                 {CHECKOUT_URL && (
                   <a href={CHECKOUT_URL} className="px-5 py-2.5 rounded-sm bg-accent text-accent-ink font-medium hover:opacity-90">Buy Pro for $5</a>
