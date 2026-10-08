@@ -126,7 +126,7 @@ function fixed(x: number, n: number): [string, string] {
   if (p < 0) { ds = '0'.repeat(-p) + ds; p = 0; }
   ds = ds.padEnd(p + n + 1, '0');
   let keep = ds.slice(0, p + n);
-  if (ds[p + n] >= '5') keep = (BigInt(keep || '0') + 1n).toString().padStart(keep.length, '0');
+  if (ds[p + n] >= '5') keep = (BigInt(keep || '0') + BigInt(1)).toString().padStart(keep.length, '0');
   return [keep.slice(0, keep.length - n).replace(/^0+/, ''), n ? keep.slice(-n) : ''];
 }
 
