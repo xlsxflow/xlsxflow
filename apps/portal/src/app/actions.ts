@@ -7,13 +7,16 @@ class Refusal extends Error {}
 
 const ORDER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export async function validateOrderAndGenerateLicense(orderId: string) {
+export async function validateOrderAndGenerateLicense(orderId: string, email: string) {
   try {
     // Polar order IDs are UUIDs; checking the shape keeps the URL below to exactly one order
     if (typeof orderId !== "string" || !ORDER_ID.test(orderId.trim())) {
       throw new Refusal("That doesn't look like a Polar order ID. Copy it from your receipt.");
     }
     orderId = orderId.trim().toLowerCase();
+    if (typeof email !== "string" || !email.includes("@")) {
+      throw new Refusal("Enter the email you bought with.");
+    }
 
     const token = process.env.POLAR_ACCESS_TOKEN;
     const expectedProductId = process.env.POLAR_PRODUCT_ID;
@@ -42,6 +45,12 @@ export async function validateOrderAndGenerateLicense(orderId: string) {
 
     const orderData = await res.json();
 
+    // The order ID is printed on receipts, so it alone must not be enough. Same message as an
+    // unknown order, so the form can't be used to test which emails bought.
+    const buyer = orderData.customer?.email;
+    if (typeof buyer !== "string" || buyer.trim().toLowerCase() !== email.trim().toLowerCase()) {
+      throw new Refusal("Order not found or invalid.");
+    }
     // The product decides the tier, not the amount: PPP discounts make the price vary by country
     if (orderData.product_id !== expectedProductId) {
       throw new Refusal("This order is not for XlsxFlow Pro.");

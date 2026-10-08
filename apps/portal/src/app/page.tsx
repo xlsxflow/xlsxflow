@@ -12,6 +12,7 @@ const columnName = (i: number): string => (i >= 26 ? columnName(Math.floor(i / 2
 
 export default function Home() {
   const [orderId, setOrderId] = useState("");
+  const [email, setEmail] = useState("");
   const [license, setLicense] = useState<string | null>(null);
   const [licenseError, setLicenseError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -29,7 +30,7 @@ export default function Home() {
     setLicenseError(null);
     setIsGenerating(true);
     try {
-      const result = await validateOrderAndGenerateLicense(orderId);
+      const result = await validateOrderAndGenerateLicense(orderId, email);
       if (result.success) {
         setLicense(result.license!);
       } else {
@@ -188,6 +189,12 @@ export default function Home() {
                 className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 placeholder:text-slate-600 transition-all"
                 placeholder="The order ID on your Polar receipt" />
             </div>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="order-email-input" className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Email</label>
+              <input type="email" id="order-email-input" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 placeholder:text-slate-600 transition-all"
+                placeholder="The email you bought with" />
+            </div>
 
             {licenseError && (
               <div className="text-red-400 text-xs bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
@@ -195,7 +202,7 @@ export default function Home() {
               </div>
             )}
 
-            <button id="generate-license-btn" onClick={handleGenerateLicense} disabled={isGenerating || !orderId}
+            <button id="generate-license-btn" onClick={handleGenerateLicense} disabled={isGenerating || !orderId || !email}
               className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-cyan-500/20 transition-all transform hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2">
               {isGenerating ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Validating...</> : '→ Generate License Key'}
             </button>
