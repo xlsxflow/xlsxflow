@@ -168,7 +168,7 @@ export default function Home() {
             <a href="https://www.npmjs.com/package/@xlsxflow/core" className="hover:text-ink">npm</a>
             <a href="/pro-licence.txt" className="hover:text-ink">Pro licence</a>
             <a href="/privacy" className="hover:text-ink">Privacy</a>
-            <a href={`mailto:${CONTACT}`} className="hover:text-ink">Contact</a>
+            <a href={`mailto:${CONTACT}`} className="hover:text-ink">{CONTACT}</a>
           </nav>
         </div>
       </footer>
