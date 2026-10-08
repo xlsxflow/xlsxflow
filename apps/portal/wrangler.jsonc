@@ -1,0 +1,17 @@
+{
+  "name": "xlsxflow",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "404-page"
+  },
+  "observability": { "enabled": true },
+  // Production values. Secrets (POLAR_ACCESS_TOKEN, LICENSE_PRIVATE_KEY) are set with
+  // `wrangler secret put`; local runs read .dev.vars instead.
+  "vars": {
+    "POLAR_API_URL": "https://api.polar.sh/v1/orders"
+  }
+}

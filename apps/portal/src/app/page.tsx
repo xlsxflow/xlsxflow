@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { validateOrderAndGenerateLicense } from "./actions";
 import { SheetReader, SheetWriter, createBlobReader } from "@xlsxflow/core";
 import type { Row } from "@xlsxflow/core";
 
@@ -32,7 +31,9 @@ export default function Home() {
     setLicenseError(null);
     setIsGenerating(true);
     try {
-      const result = await validateOrderAndGenerateLicense(orderId, email);
+      const res = await fetch("/api/licence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId, email }) });
+      if (!res.ok) throw new Error(`The licence service answered ${res.status}. Please try again later.`);
+      const result = await res.json() as { success: boolean; license?: string; error?: string };
       if (result.success) {
         setLicense(result.license!);
       } else {
@@ -198,7 +199,7 @@ export default function Home() {
               <li>$5 per developer, with local pricing at checkout.</li>
               <li>Perpetual licence, with every version released within a year of your order.</li>
               <li>Build servers and CI don&apos;t need their own key.</li>
-              <li>Full refund within 14 days if it doesn&apos;t work for you.</li>
+              <li>Full refund within 14 days if it doesn&apos;t work for you, processed by Polar.</li>
             </ul>
             <div className="flex flex-wrap items-center gap-4">
               {CHECKOUT_URL && (

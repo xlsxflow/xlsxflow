@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Privacy · XlsxFlow",
@@ -9,7 +10,7 @@ export default function Privacy() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-300 font-sans">
       <div className="max-w-2xl mx-auto px-6 py-16 flex flex-col gap-5 text-sm leading-relaxed">
-        <a href="/" className="text-cyan-400 hover:text-cyan-300">XlsxFlow</a>
+        <Link href="/" className="text-cyan-400 hover:text-cyan-300">XlsxFlow</Link>
         <h1 className="text-3xl font-bold text-white">Privacy</h1>
         <p className="text-slate-500">Last updated 8 October 2026</p>
 
