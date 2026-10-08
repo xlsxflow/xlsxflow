@@ -21,8 +21,8 @@ pnpm build && npx wrangler@4 dev          # site and Worker on http://localhost:
 | `ALLOW_SANDBOX` | `1` to accept sandbox orders. Sandbox orders are free, so never set it on the live site |
 | `LICENSE_PRIVATE_KEY` | Base64 PKCS#8 DER Ed25519 key matching `PUBLIC_KEY` in the `@xlsxflow/pro` source |
 
-`NEXT_PUBLIC_CHECKOUT_URL` (a Polar checkout link for Pro) is read by `pnpm build` from `.env.local` or the
-environment, and shows the "Buy Pro" button. Without it the button is hidden.
+The Pro button uses the Polar checkout link in `CHECKOUT_URL` in `src/app/page.tsx`. Its success URL must be
+`https://www.xlsxflow.workers.dev/?checkout_id={CHECKOUT_ID}#licence`, so the licence key appears after checkout.
 
 ## Deploy to Cloudflare
 

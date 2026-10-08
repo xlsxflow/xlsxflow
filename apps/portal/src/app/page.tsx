@@ -3,7 +3,8 @@ import SheetDemo from "./sheet-demo";
 import LicenceForm from "./licence-form";
 import CopyCommand from "./copy-command";
 
-const CHECKOUT_URL = process.env.NEXT_PUBLIC_CHECKOUT_URL;
+// Polar checkout link; BETATEST100 is applied in the link, and Polar returns buyers to #licence with checkout_id
+const CHECKOUT_URL = "https://buy.polar.sh/polar_cl_emToZA1TYdXDlOgadK1TvNlJ0EHjymNwIDCYT1haXzq";
 const REPO = "https://github.com/xlsxflow/xlsxflow";
 const CONTACT = "palikaomkar@gmail.com";
 
@@ -244,7 +245,7 @@ export default async function Home() {
                 that usually needs Excel itself: templates, charts, pivot tables and passwords.
               </p>
               <ul className="flex flex-col gap-2 text-muted list-disc pl-5">
-                <li>$5 per developer, one-time payment.</li>
+                <li>Free for the first 100 developers during the beta, then $5 per developer, one-time payment.</li>
                 <li>Perpetual licence, with every version released within a year of your order.</li>
                 <li>Build servers and CI don&apos;t need their own key.</li>
                 <li>Full refund within 14 days if it doesn&apos;t work for you, processed by Polar.</li>
@@ -253,15 +254,12 @@ export default async function Home() {
                 <h3 className="font-semibold mb-2">How it works</h3>
                 <ol className="flex flex-col gap-2 list-decimal pl-5 text-muted">
                   <li>Install it: <code className="font-mono text-sm text-ink">npm install @xlsxflow/core @xlsxflow/pro</code></li>
-                  <li>Buy Pro. Polar emails you a receipt with your order ID.</li>
-                  <li>Enter the order ID and your email in <a href="#licence" className={`${link} text-ink`}>Get your licence key</a> below.</li>
+                  <li>Get Pro through the Polar checkout. You come back here and your key appears in <a href="#licence" className={`${link} text-ink`}>Get your licence key</a>. Lost it later? Enter the order ID from your Polar receipt there.</li>
                   <li>Call <code className="font-mono text-sm text-ink">await setLicenseKey(key)</code> once at startup. Without a key, Pro functions throw an error.</li>
                 </ol>
               </div>
               <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
-                {CHECKOUT_URL && (
-                  <a href={CHECKOUT_URL} className="px-5 py-2.5 rounded-sm bg-accent text-accent-ink font-medium hover:opacity-90">Buy Pro for $5</a>
-                )}
+                <a href={CHECKOUT_URL} className="px-5 py-2.5 rounded-sm bg-accent text-accent-ink font-medium hover:opacity-90">Get Pro free</a>
                 <a href="/pro-licence.txt" className={link}>Licence agreement</a>
               </div>
             </div>
