@@ -18,7 +18,7 @@ export { CfbReader, isCfb, type CfbEntry } from './core/cfb';
 export { StylePatcher } from './core/style-patcher';
 export {
   resolveWorkbookParts, partRelationships, recalcOnOpen, mapFormulaRefs, shiftFormula, dateToSerial,
-  colIndex, colLetter, encodeXString, decodeXString,
+  colIndex, colLetter, encodeXString, decodeXString, checkCellText,
   type WorkbookParts, type Relationship, type RefMapper, type RefRole,
 } from './core/utils';
 export { anchorXml, drawingPartXml, DRAWING_NS, type Placement } from './core/image';

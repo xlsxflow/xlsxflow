@@ -1,6 +1,6 @@
 {
   "name": "@xlsxflow/core",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Streaming, zero-dependency .xlsx reader, writer and editor for Node, Bun, browsers and Cloudflare Workers",
   "license": "MIT",
   "author": "Omkar Palika",

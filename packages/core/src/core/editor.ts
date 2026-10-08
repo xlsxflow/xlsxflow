@@ -9,7 +9,7 @@ import {
 } from './sheet-shift';
 import {
   resolveWorkbookParts, partRelationships, recalcOnOpen, attr, dirOf, relsPathOf, validateSheetName,
-  colIndex, colLetter, dateToSerial, MAX_ROWS, MAX_COLUMNS, encodeXString, shiftFormula, escapeXml, unescapeXml, escapeRe, xmlElements, type WorkbookParts } from './utils';
+  colIndex, colLetter, dateToSerial, MAX_ROWS, MAX_COLUMNS, checkCellText, encodeXString, shiftFormula, escapeXml, unescapeXml, escapeRe, xmlElements, type WorkbookParts } from './utils';
 
 // A new cell value; null clears it. The object form sets a formula (leading "=" optional) or a value,
 // and can change the cell's style: only the style properties given change. With neither `value` nor
@@ -39,7 +39,7 @@ function editedCell(p: string, ref: string, attrs: string, edit: CellValue | { f
     return `<${p}c r="${ref}"${attrs}><${p}v>${dateToSerial(edit)}</${p}v></${p}c>`;
   }
   if (typeof edit === 'object') return `<${p}c r="${ref}"${attrs}><${p}f>${escapeXml(edit.formula.replace(/^=/, ''))}</${p}f></${p}c>`;
-  const text = escapeXml(encodeXString(edit));
+  const text = escapeXml(encodeXString(checkCellText(edit, ref)));
   const t = /^\s|\s$/.test(edit) ? `<${p}t xml:space="preserve">${text}</${p}t>` : `<${p}t>${text}</${p}t>`;
   return `<${p}c r="${ref}"${attrs} t="inlineStr"><${p}is>${t}</${p}is></${p}c>`;
 }
@@ -94,8 +94,8 @@ export class SheetEditor {
     if (!rows) this.cellEdits.set(sheetName, rows = new Map());
     for (const [ref, edit] of Object.entries(cells)) {
       const m = /^\$?([A-Za-z]{1,3})\$?(\d+)$/.exec(ref);
-      if (!m || parseInt(m[2], 10) < 1) throw new Error(`Invalid cell reference "${ref}".`);
-      const r = parseInt(m[2], 10);
+      const r = m ? parseInt(m[2], 10) : 0;
+      if (!m || r < 1 || r > MAX_ROWS || colIndex(m[1]) >= MAX_COLUMNS) throw new Error(`Invalid cell reference "${ref}".`);
       if (!rows.has(r)) rows.set(r, new Map());
       rows.get(r)!.set(colIndex(m[1]), edit);
     }
@@ -484,7 +484,7 @@ export class SheetEditor {
         if (typeof val === 'boolean') return `<c r="${colRef}" t="b"><v>${val ? 1 : 0}</v></c>`;
         if (typeof val === 'number') return `<c r="${colRef}"><v>${val}</v></c>`;
         if (typeof val === 'string') {
-          return `<c r="${colRef}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(encodeXString(val))}</t></is></c>`;
+          return `<c r="${colRef}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(encodeXString(checkCellText(val, colRef)))}</t></is></c>`;
         }
         return `<c r="${colRef}"/>`;
       }).join('');

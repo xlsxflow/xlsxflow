@@ -195,3 +195,54 @@ describe('end-user edge cases', () => {
     expect(rows[0]).toEqual(['2026-10-08', '08-Oct-2026', '2026-10-08 14:30:00']);
   });
 });
+
+describe('end-user edge cases, round 2', () => {
+  const blob = (b: Uint8Array) => createBlobReader(new Blob([b]));
+
+  it('SheetEditor.setCells refuses addresses past Excel\'s last column and row', async () => {
+    for (const ref of ['XFE1', 'A1048577']) expect(() => new SheetEditor().setCells('Sheet1', { [ref]: 1 })).toThrow(/Invalid cell reference/);
+    expect(() => new SheetEditor().setCells('Sheet1', { XFD1048576: 1 })).not.toThrow();
+  });
+
+  it('refuses text longer than Excel\'s 32,767 characters per cell', async () => {
+    const long = 'x'.repeat(32768);
+    await expect(bytesOf(new SheetWriter().write([[long]]))).rejects.toThrow(/Cell A1 has 32768 characters/);
+    await expect(bytesOf(new SheetWriter({ sharedStrings: true }).write([['x'.repeat(32767)]]))).resolves.toBeInstanceOf(Uint8Array);
+    const src = await bytesOf(new SheetWriter().write([[1]]));
+    await expect(bytesOf(new SheetEditor().setCells('Sheet1', { B1: long }).edit(blob(src)))).rejects.toThrow(/32,?767/);
+  });
+
+  it('checks colours: ARGB and RGB hex pass, other text throws', async () => {
+    const bytes = await bytesOf(new SheetWriter().write([[{ value: 1, style: { font: { color: '#ff0000' }, fill: { type: 'solid', fgColor: '00FF00' } } }]]));
+    const styles = await entryText(bytes, 'xl/styles.xml');
+    expect(styles).toContain('<color rgb="FFFF0000"/>');
+    expect(styles).toContain('<fgColor rgb="FF00FF00"/>');
+    await expect(bytesOf(new SheetWriter().write([[{ value: 1, style: { font: { color: 'red' } } }]]))).rejects.toThrow(/Invalid colour "red"/);
+  });
+
+  it('a shared string index past the table reads as an empty cell', async () => {
+    const original = await bytesOf(new SheetWriter({ sharedStrings: true }).write([['a', 'b']]));
+    const zip = new ZipStreamWriter();
+    const src = new ZipRandomAccessParser(blob(original));
+    await src.parseCentralDirectory();
+    const building = (async () => {
+      for (const f of src.getFiles()) {
+        let text = await new Response(await src.extractStream(f)).text();
+        if (f === 'xl/worksheets/sheet1.xml') text = text.replace('<v>1</v>', '<v>99</v>');
+        await zip.addFile(f, new Response(text).body!);
+      }
+      await zip.close();
+    })();
+    const crafted = await bytesOf(zip.stream);
+    await building;
+    expect(await readRows(crafted)).toEqual([['a', null]]);
+  });
+
+  it('drawing anchors refuse cells past the sheet and put a reversed range the right way round', async () => {
+    const { anchorXml } = await import('../src/core/image');
+    const size = { width: 10, height: 10 };
+    expect(() => anchorXml({ at: 'XFE1' }, size, '')).toThrow(/Invalid anchor cell "XFE1"/);
+    expect(() => anchorXml({ range: 'A1:A1048577' }, size, '')).toThrow(/Invalid anchor cell/);
+    expect(anchorXml({ range: 'F20:A2' }, size, '')).toBe(anchorXml({ range: 'A2:F20' }, size, ''));
+  });
+});

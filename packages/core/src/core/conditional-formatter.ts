@@ -1,10 +1,11 @@
+import { argb } from './utils';
 import { ConditionalFormat, DataBarRule, ColorScaleRule, ConditionalFormatRule, HighlightStyle } from './types';
 
 function escapeXml(val: unknown): string {
   return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-const color = (rgb: string) => `<color rgb="${escapeXml(rgb)}"/>`;
+const color = (rgb: string) => `<color rgb="${argb(rgb)}"/>`;
 const bound = (type: 'min' | 'max', value?: number) =>
   value === undefined ? `<cfvo type="${type}"/>` : `<cfvo type="num" val="${escapeXml(value)}"/>`;
 const formula = (f: string | number) => `<formula>${escapeXml(String(f).replace(/^=/, ''))}</formula>`;

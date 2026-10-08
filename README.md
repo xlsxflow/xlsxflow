@@ -224,6 +224,8 @@ writer.addSheet('Sales', [
 });
 ```
 
+Colours are ARGB hex (`FFC00000`); RGB hex (`C00000` or `#C00000`) is opaque. A cell holds at most 32,767 characters, as in Excel.
+
 Other sheet options:
 
 ```typescript

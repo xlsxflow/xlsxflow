@@ -332,7 +332,8 @@ export function parseWorksheet(
                   resolvedValue = null;
                 } else if (currentCellType === 's') {
                   const index = parseInt(currentCellValue, 10);
-                  resolvedValue = sharedStrings.get(index) ?? currentCellValue;
+                  // An index past the table points nowhere: the cell is empty
+                  resolvedValue = sharedStrings.get(index) ?? null;
                 } else if (currentCellType === 'b') {
                   resolvedValue = currentCellValue === '1' || currentCellValue === 'true';
                 } else if (currentCellType === 'e') {

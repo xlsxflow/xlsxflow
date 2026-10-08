@@ -1,3 +1,4 @@
+import { argb } from './utils';
 import { CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, HighlightStyle } from './types';
 
 function escapeXml(val: unknown): string {
@@ -11,13 +12,13 @@ export function fontXml(font: CellFont, nameTag = 'name'): string {
   if (font.italic) xml += '<i/>';
   if (font.underline) xml += '<u/>';
   if (font.size) xml += `<sz val="${escapeXml(font.size)}"/>`;
-  if (font.color) xml += `<color rgb="${escapeXml(font.color)}"/>`;
+  if (font.color) xml += `<color rgb="${argb(font.color)}"/>`;
   if (font.name) xml += `<${nameTag} val="${escapeXml(font.name)}"/>`;
   return xml;
 }
 
 export const borderSideXml = (tag: string, s?: { style: string; color?: string }) =>
-  s ? `<${tag} style="${escapeXml(s.style)}">${s.color ? `<color rgb="${escapeXml(s.color)}"/>` : ''}</${tag}>` : `<${tag}/>`;
+  s ? `<${tag} style="${escapeXml(s.style)}">${s.color ? `<color rgb="${argb(s.color)}"/>` : ''}</${tag}>` : `<${tag}/>`;
 
 export function borderXml(b: CellBorder): string {
   const side = borderSideXml;
@@ -26,10 +27,10 @@ export function borderXml(b: CellBorder): string {
 
 export function fillXml(fill: CellFill | GradientFill): string {
   if (fill.type === 'gradient') {
-    const stops = fill.stops.map(s => `<stop position="${s.position}"><color rgb="${escapeXml(s.color)}"/></stop>`).join('');
+    const stops = fill.stops.map(s => `<stop position="${s.position}"><color rgb="${argb(s.color)}"/></stop>`).join('');
     return `<fill><gradientFill degree="${escapeXml(fill.degree ?? 0)}">${stops}</gradientFill></fill>`;
   }
-  return `<fill><patternFill patternType="solid"><fgColor rgb="${escapeXml(fill.fgColor)}"/></patternFill></fill>`;
+  return `<fill><patternFill patternType="solid"><fgColor rgb="${argb(fill.fgColor)}"/></patternFill></fill>`;
 }
 
 // Attributes of an <alignment> element
@@ -79,7 +80,7 @@ export class StyleEngine {
     if (style.numFmt) xml += `<numFmt numFmtId="${this.registerNumFmt(style.numFmt)}" formatCode="${escapeXml(style.numFmt)}"/>`;
     if (style.fill?.type === 'solid') {
       // A differential solid fill takes its colour from bgColor
-      const c = escapeXml(style.fill.fgColor);
+      const c = argb(style.fill.fgColor);
       xml += `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor rgb="${c}"/></patternFill></fill>`;
     }
     if (style.border) xml += borderXml(style.border);

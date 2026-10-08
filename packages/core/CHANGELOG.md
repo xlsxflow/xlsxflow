@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.3
+
+### Fixed
+
+- `SheetEditor.setCells` refuses addresses past column XFD or row 1,048,576, instead of writing a file Excel reports as damaged.
+- `SheetWriter` and `SheetEditor` refuse text longer than Excel's 32,767 characters per cell.
+- Colours are checked: ARGB (`FFFF0000`) and RGB (`FF0000`, `#FF0000`) hex are accepted, anything else (`'red'`) throws instead of making Excel repair the file.
+- Picture anchors past the last column or row throw; a range given the wrong way round (`F20:A2`) is turned round.
+- `SheetReader`: a shared string index past the end of the table reads as an empty cell, not as the index.
+
+### Added
+
+- `checkCellText` is exported, for `@xlsxflow/pro`.
+
 ## 1.1.2
 
 ### Fixed

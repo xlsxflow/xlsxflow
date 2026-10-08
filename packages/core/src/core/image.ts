@@ -1,5 +1,5 @@
 import type { SheetImage } from './types';
-import { colIndex, colLetter, partRelationships, unescapeXml, xmlElements } from './utils';
+import { colIndex, colLetter, MAX_COLUMNS, MAX_ROWS, partRelationships, unescapeXml, xmlElements } from './utils';
 
 const EMU_PER_PX = 9525;
 
@@ -86,8 +86,9 @@ const escapeXml = (s: string) =>
 
 const cellPos = (ref: string) => {
   const m = /^\$?([A-Za-z]{1,3})\$?(\d+)$/.exec(ref.trim());
-  if (!m) throw new Error(`Invalid anchor cell "${ref}".`);
-  return { col: colIndex(m[1]), row: parseInt(m[2], 10) - 1 };
+  const col = m ? colIndex(m[1]) : -1, row = m ? parseInt(m[2], 10) - 1 : -1;
+  if (col < 0 || col >= MAX_COLUMNS || row < 0 || row >= MAX_ROWS) throw new Error(`Invalid anchor cell "${ref}".`);
+  return { col, row };
 };
 const marker = (tag: string, { col, row }: { col: number; row: number }) =>
   `<xdr:${tag}><xdr:col>${col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:${tag}>`;
@@ -105,9 +106,11 @@ export const DRAWING_NS = 'xmlns:xdr="http://schemas.openxmlformats.org/drawingm
 export function anchorXml(place: Placement, natural: { width: number; height: number }, body: string, attrs = ''): string {
   if ('range' in place) {
     const [from, to = from] = place.range.split(':');
-    const end = cellPos(to);
-    // The object fills the range: it ends at the far edge of the last cell
-    return `<xdr:twoCellAnchor editAs="oneCell"${attrs}>${marker('from', cellPos(from))}${marker('to', { col: end.col + 1, row: end.row + 1 })}${body}<xdr:clientData/></xdr:twoCellAnchor>`;
+    const a = cellPos(from), b = cellPos(to);
+    // The object fills the range, given either way round: it ends at the far edge of the last cell
+    const start = { col: Math.min(a.col, b.col), row: Math.min(a.row, b.row) };
+    const end = { col: Math.max(a.col, b.col) + 1, row: Math.max(a.row, b.row) + 1 };
+    return `<xdr:twoCellAnchor editAs="oneCell"${attrs}>${marker('from', start)}${marker('to', end)}${body}<xdr:clientData/></xdr:twoCellAnchor>`;
   }
   const { width: w, height: h } = natural;
   const width = place.width ?? (place.height ? w * place.height / h : w);

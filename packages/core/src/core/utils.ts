@@ -153,6 +153,21 @@ export function decodeXString(s: string): string {
 // Excel's sheet size (A..XFD, 1..1048576)
 export const MAX_COLUMNS = 16384;
 export const MAX_ROWS = 1048576;
+// Excel's limit on the characters in one cell
+export const MAX_CELL_TEXT = 32767;
+
+export function checkCellText(s: string, ref: string): string {
+  if (s.length > MAX_CELL_TEXT) throw new Error(`Cell ${ref} has ${s.length} characters, more than Excel's ${MAX_CELL_TEXT}.`);
+  return s;
+}
+
+// Colours are ARGB hex ("FFFF0000"); "FF0000" and "#FF0000" get an opaque alpha. Anything else
+// makes Excel repair the file.
+export function argb(c: string): string {
+  const m = /^#?([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.exec(String(c));
+  if (!m) throw new Error(`Invalid colour "${c}": use ARGB hex such as "FFFF0000".`);
+  return (m[1].length === 6 ? 'FF' + m[1] : m[1]).toUpperCase();
+}
 
 // 0-based column of letters like "BC" (or a reference like "BC12"); -1 when there are none
 export function colIndex(ref: string): number {

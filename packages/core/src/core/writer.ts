@@ -3,7 +3,7 @@ import { StyleEngine, fontXml } from './style-engine';
 import { ConditionalFormatter } from './conditional-formatter';
 import { FormulaEngine } from './formula-engine';
 import { ZipStreamWriter } from './zip-stream-writer';
-import { encodeXString, colLetter, colIndex, dateToSerial, validateSheetName, defaultDateFormat, MAX_COLUMNS, MAX_ROWS } from './utils';
+import { encodeXString, colLetter, colIndex, dateToSerial, validateSheetName, defaultDateFormat, checkCellText, argb, MAX_COLUMNS, MAX_ROWS } from './utils';
 import { imageInfo, drawingXml, type ImageInfo } from './image';
 
 function escapeXml(val: unknown): string {
@@ -317,7 +317,7 @@ export class SheetWriter {
     const page = options.pageSetup;
     const fitToPage = page && (page.fitToWidth !== undefined || page.fitToHeight !== undefined);
     const sheetPr = options.tabColor || fitToPage
-      ? `<sheetPr>${options.tabColor ? `<tabColor rgb="${escapeXml(options.tabColor)}"/>` : ''}${fitToPage ? '<pageSetUpPr fitToPage="1"/>' : ''}</sheetPr>`
+      ? `<sheetPr>${options.tabColor ? `<tabColor rgb="${argb(options.tabColor)}"/>` : ''}${fitToPage ? '<pageSetUpPr fitToPage="1"/>' : ''}</sheetPr>`
       : '';
     const sheetFormatPr = outlineRow || outlineCol
       ? `<sheetFormatPr defaultRowHeight="15"${outlineRow ? ` outlineLevelRow="${outlineRow}"` : ''}${outlineCol ? ` outlineLevelCol="${outlineCol}"` : ''}/>`
@@ -416,6 +416,7 @@ export class SheetWriter {
           return `<c r="${colRef}"${sAttr}><v>${dateToSerial(val)}</v></c>`;
         }
         if (typeof val === 'string') {
+          checkCellText(val, colRef);
           if (this.writerOptions.sharedStrings) {
             let index = this.sharedStrings.get(val);
             if (index === undefined) this.sharedStrings.set(val, index = this.sharedStrings.size);
