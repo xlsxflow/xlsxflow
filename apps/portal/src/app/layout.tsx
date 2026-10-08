@@ -15,8 +15,17 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "XlsxFlow",
-  description: "Streaming xlsx reader, writer and editor for JavaScript. Also reads .xls and .ods, and writes .ods.",
+  metadataBase: new URL("https://www.xlsxflow.workers.dev"),
+  title: "XlsxFlow: streaming Excel (.xlsx) reader and writer for JavaScript",
+  description: "Read, write and edit .xlsx files as a stream in Node, Bun, browsers and Cloudflare Workers, with flat memory at millions of cells. Zero dependencies, MIT licence. Also reads .xls and .ods.",
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: "XlsxFlow",
+    title: "XlsxFlow: streaming Excel (.xlsx) reader and writer for JavaScript",
+    description: "Read, write and edit .xlsx files as a stream, with flat memory at millions of cells. Zero dependencies, MIT licence.",
+    url: "/",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -4,6 +4,8 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "Privacy · XlsxFlow",
   description: "What the XlsxFlow website does with your data.",
+  alternates: { canonical: "/privacy" },
+  openGraph: { title: "Privacy · XlsxFlow", url: "/privacy" },
 };
 
 export default function Privacy() {
