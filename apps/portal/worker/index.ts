@@ -10,7 +10,7 @@ interface Env {
   LICENSE_PRIVATE_KEY?: string;
 }
 
-const CONTACT = "palikaomkar.22.cse@anits.edu.in";
+const CONTACT = "palikaomkar@gmail.com";
 const ORDER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // A reason the buyer can act on; anything else is logged and shown as a generic error

@@ -42,7 +42,7 @@ export default function Privacy() {
         <h2 className="text-lg font-semibold mt-6">Contact</h2>
         <p>
           Questions, or requests to see or delete data about you:{" "}
-          <a href="mailto:palikaomkar.22.cse@anits.edu.in" className="underline decoration-grid underline-offset-4 hover:decoration-accent">palikaomkar.22.cse@anits.edu.in</a>
+          <a href="mailto:palikaomkar@gmail.com" className="underline decoration-grid underline-offset-4 hover:decoration-accent">palikaomkar@gmail.com</a>
         </p>
       </div>
     </main>
