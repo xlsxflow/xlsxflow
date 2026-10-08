@@ -2,7 +2,7 @@ import { CellValue } from './types';
 
 export interface CsvOptions {
   delimiter?: string;  // default ","
-  convert?: boolean;   // default true: unquoted numbers and TRUE/FALSE become numbers and booleans, empty fields null
+  convert?: boolean;   // default true: unquoted numbers and TRUE/FALSE become numbers and booleans. Empty unquoted fields are null either way
 }
 
 // Numbers as Excel would read them; "007" and "1e5x" stay text
@@ -36,7 +36,8 @@ export async function* parseCsv(
   const rows: CellValue[][] = [];
 
   const endField = () => {
-    row.push(quoted || !convert ? field : convertField(field));
+    // An empty unquoted field is null in both modes; a quoted "" stays an empty string
+    row.push(quoted ? field : !convert ? (field === '' ? null : field) : convertField(field));
     field = '';
     quoted = false;
   };

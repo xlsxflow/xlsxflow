@@ -83,7 +83,7 @@ Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB unco
 
 **Reading files from untrusted users** (uploads on a server): set `maxUncompressedBytes` to what you expect, such as `50_000_000`. Corrupt or crafted ZIPs (overlapping entries, entries that inflate past their stated size, directories pointing outside the file) are rejected either way. The limit also bounds the empty cells added before far-right cells, since one tiny cell in column XFD pads its row to 16,384 values. Values are returned as written: hyperlinks may be `javascript:` URLs and text may start with `=`, so check them before putting them in a web page or a CSV that a spreadsheet will open.
 
-`sheetToJson(rows, headerRowIndex = 0)` turns the rows into objects keyed by the header row, and `streamToCsv(rows)` returns the sheet as CSV text. Both hold the whole result in memory.
+`sheetToJson(rows, headerRowIndex = 0)` turns the rows into objects keyed by the header row (a repeated header gets a suffix: `Name`, `Name_2`), and `streamToCsv(rows)` returns the sheet as CSV text. Both hold the whole result in memory.
 
 In Node.js, read straight from disk with `XlsxFlow.readFile`, or pass `await createFileReader(path)` to any function that takes a reader:
 
@@ -140,7 +140,7 @@ import { SheetWriter, parseCsv } from '@xlsxflow/core';
 const xlsx = new SheetWriter().addSheet('Data', parseCsv(csvStream)).write();
 ```
 
-Quoted fields can hold delimiters, line breaks and `""`. Unquoted numbers and `TRUE`/`FALSE` become numbers and booleans, and empty fields become empty cells; `{ convert: false }` keeps everything as text, and `{ delimiter: ';' }` sets the delimiter. Dates stay text, since CSV files do not say which date order they use.
+Quoted fields can hold delimiters, line breaks and `""`. Unquoted numbers and `TRUE`/`FALSE` become numbers and booleans, and empty fields become empty cells (`null`; a quoted `""` stays an empty string); `{ convert: false }` keeps everything else as text, and `{ delimiter: ';' }` sets the delimiter. Dates stay text, since CSV files do not say which date order they use.
 
 ### .xls and .ods Files
 
@@ -158,7 +158,7 @@ and document properties. `formatted: true` works on both; `formulas: true` works
   [`@xlsxflow/pro`](#free-and-pro).
 
 `OdsWriter` writes `.ods` with the same rows as `SheetWriter`: values, dates, formulas (converted to
-OpenFormula), merged cells, column widths, frozen panes, hidden sheets and document properties. Cell styles,
+OpenFormula, with their results), merged cells, column widths, frozen panes, hidden sheets and document properties. Cell styles,
 hyperlinks, notes and images are not written to `.ods`.
 
 ```typescript

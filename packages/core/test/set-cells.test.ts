@@ -53,7 +53,7 @@ describe('SheetEditor.setCells', () => {
     expect(rows[2].formulas?.[2]).toBe('B2*2');
     expect(rows[3].cells).toEqual([' padded ']);
     expect(rows[4].cells).toEqual(['e', 5]);
-    expect(rows[5].cells[1]).toBe(46024); // a date over an unformatted cell is its serial number
+    expect(rows[5].cells[1]).toBe('2026-01-02T00:00:00.000Z'); // an unformatted cell gets a date format
 
     expect(await read(out, 'Other')).toEqual([expect.objectContaining({ cells: ['untouched'] })]);
     expect(await entry(out, 'xl/workbook.xml')).toContain('fullCalcOnLoad="1"');

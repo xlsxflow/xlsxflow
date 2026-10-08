@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.2
+
+### Fixed
+
+- `SheetWriter` throws an error for a row longer than 16,384 cells or past row 1,048,576, instead of writing a file Excel reports as damaged.
+- `SheetEditor.setCells`: a date in a cell without a date format gets `yyyy-mm-dd` (or `yyyy-mm-dd hh:mm:ss` with a time), as in `SheetWriter`, instead of showing as a serial number.
+- `OdsWriter` stores formula results, so readers that don't recalculate show them.
+- `sheetToJson` keeps every column when headers repeat: the second `Name` becomes `Name_2`.
+- `parseCsv` returns `null` for empty unquoted fields with `{ convert: false }` too.
+
+### Added
+
+- `StylePatcher` is exported, for `@xlsxflow/pro`.
+
 ## 1.1.1
 
 - README: the XlsxFlow website address, and Pro at a flat $5.

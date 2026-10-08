@@ -3,7 +3,7 @@ import { StyleEngine, fontXml } from './style-engine';
 import { ConditionalFormatter } from './conditional-formatter';
 import { FormulaEngine } from './formula-engine';
 import { ZipStreamWriter } from './zip-stream-writer';
-import { encodeXString, colLetter, colIndex, dateToSerial, validateSheetName } from './utils';
+import { encodeXString, colLetter, colIndex, dateToSerial, validateSheetName, defaultDateFormat, MAX_COLUMNS, MAX_ROWS } from './utils';
 import { imageInfo, drawingXml, type ImageInfo } from './image';
 
 function escapeXml(val: unknown): string {
@@ -19,7 +19,6 @@ function isStyledCell(v: CellValue | StyledCell): v is StyledCell {
   return typeof v === 'object' && v !== null && 'value' in v;
 }
 
-const DAY_MS = 86400000;
 
 // "A1:C10" -> "$A$1:$C$10"
 const absoluteRef = (ref: string) => ref.replace(/([A-Za-z]+)(\d+)/g, '$$$1$$$2');
@@ -358,6 +357,9 @@ export class SheetWriter {
       if (done) break;
 
       const rowNum = ri + 1;
+      // Past Excel's sheet size the file is damaged, so refuse it instead
+      if (rowNum > MAX_ROWS) throw new Error(`Row ${rowNum} is past Excel's last row (${MAX_ROWS}).`);
+      if (row.length > MAX_COLUMNS) throw new Error(`Row ${rowNum} has ${row.length} cells, more than Excel's ${MAX_COLUMNS} columns.`);
       chunkStr += optionRowsBefore(rowNum);
       if (rowOptions[nextRowOption]?.[0] === rowNum) nextRowOption++;
       const cellsXml = row.map((cell, ci) => {
@@ -367,7 +369,7 @@ export class SheetWriter {
         let cellStyle = styledCell.style;
         if (val instanceof Date && !cellStyle?.numFmt) {
           // A date needs a date format, or Excel shows the bare serial number
-          cellStyle = { ...cellStyle, numFmt: val.getTime() % DAY_MS === 0 ? 'yyyy-mm-dd' : 'yyyy-mm-dd hh:mm:ss' };
+          cellStyle = { ...cellStyle, numFmt: defaultDateFormat(val) };
         }
         const style = cellStyle ? this.styleEngine.registerStyle(cellStyle) : 0;
         const sAttr = style > 0 ? ` s="${style}"` : '';

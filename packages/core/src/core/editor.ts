@@ -272,7 +272,10 @@ export class SheetEditor {
         let patcher: StylePatcher | undefined;
         const styled = [...editsByPath.values(), ...added.values()]
           .some(rows => [...rows.values()].some(cells => [...cells.values()].some(e => styleOf(e))));
-        if (styled) {
+        // Dates may need a date format added to their cells
+        const dated = [...editsByPath.values(), ...added.values()]
+          .some(rows => [...rows.values()].some(cells => [...cells.values()].some(e => contentOf(e) instanceof Date)));
+        if (styled || (dated && parts.styles)) {
           if (!parts.styles) throw new Error('Workbook has no styles part.');
           patcher = new StylePatcher(await read(parts.styles));
           written.add(parts.styles);
@@ -346,6 +349,10 @@ export class SheetEditor {
         attrs = `${attrs.replace(/\ss="[^"]*"/, '')} s="${patcher!.patch(base, style)}"`;
       }
       const content = contentOf(edit);
+      if (content instanceof Date && patcher) {
+        const base = parseInt(/\ss="(\d+)"/.exec(attrs)?.[1] ?? '0', 10);
+        attrs = `${attrs.replace(/\ss="[^"]*"/, '')} s="${patcher.dateFormat(base, content)}"`;
+      }
       if (content === KEEP) {
         return existing?.[2] !== undefined ? `<${p}c r="${ref}"${attrs}>${existing[2]}</${p}c>` : `<${p}c r="${ref}"${attrs}/>`;
       }

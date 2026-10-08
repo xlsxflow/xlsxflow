@@ -153,3 +153,45 @@ describe('formula cached values', () => {
     expect(await readRows(bytes)).toEqual([[1, 0], [true, false, 'ab', '#DIV/0!']]);
   });
 });
+
+// Found by end-user edge-case tests against the published 1.1.1
+describe('end-user edge cases', () => {
+  it('refuses cells past Excel\'s last column and rows past its last row', async () => {
+    const wide = new Array(16385).fill(null);
+    await expect(bytesOf(new SheetWriter().write([wide]))).rejects.toThrow(/16384 columns/);
+    await expect(bytesOf(new SheetWriter().write([new Array(16384).fill(1)]))).resolves.toBeInstanceOf(Uint8Array);
+    async function* rows(): AsyncGenerator<Row> { for (let i = 0; i < 1048577; i++) yield []; }
+    const writer = new SheetWriter();
+    writer.addSheet('S', rows());
+    await expect(bytesOf(writer.write())).rejects.toThrow(/last row \(1048576\)/);
+  }, 60000);
+
+  it('OdsWriter stores formula results', async () => {
+    const { OdsWriter } = await import('../src/core/ods-writer');
+    const bytes = await bytesOf(new OdsWriter().addSheet('S', [[1, 2, { value: null, formula: '=A1+B1' }, { value: null, formula: 'A1/0' }]]).write());
+    expect(await readRows(bytes)).toEqual([[1, 2, 3, '#DIV/0!']]);
+  });
+
+  it('sheetToJson keeps columns with repeated headers', async () => {
+    const { sheetToJson } = await import('../src/core/utils');
+    const bytes = await bytesOf(new SheetWriter().write([['Name', 'Name', null, 'Name'], ['a', 'b', 'c', 'd']]));
+    const json = await sheetToJson(await new SheetReader().parse(createBlobReader(new Blob([bytes]))));
+    expect(json).toEqual([{ Name: 'a', Name_2: 'b', Column3: 'c', Name_3: 'd' }]);
+  });
+
+  it('parseCsv gives null for empty unquoted fields with or without convert', async () => {
+    const { parseCsv } = await import('../src/core/csv');
+    const all = async (it: AsyncIterable<unknown[]>) => { const out = []; for await (const r of it) out.push(r); return out; };
+    expect(await all(parseCsv('a,,""\n'))).toEqual([['a', null, '']]);
+    expect(await all(parseCsv('a,,""\n', { convert: false }))).toEqual([['a', null, '']]);
+  });
+
+  it('SheetEditor gives a date in a General cell a date format, and keeps an existing one', async () => {
+    const src = await bytesOf(new SheetWriter().write([['x', { value: 1, style: { numFmt: 'dd-mmm-yyyy' } }]]));
+    const d = new Date(Date.UTC(2026, 9, 8));
+    const out = await bytesOf(new SheetEditor().setCells('Sheet1', { A1: d, B1: d, C1: new Date(Date.UTC(2026, 9, 8, 14, 30)) }).edit(createBlobReader(new Blob([src]))));
+    const rows = [];
+    for await (const r of await new SheetReader().parse(createBlobReader(new Blob([out])), { formatted: true })) rows.push(r.formatted);
+    expect(rows[0]).toEqual(['2026-10-08', '08-Oct-2026', '2026-10-08 14:30:00']);
+  });
+});

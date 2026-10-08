@@ -1,6 +1,7 @@
 import { CellStyle, CellFont } from './types';
 import { fontXml, fillXml, borderSideXml, alignmentAttrs } from './style-engine';
-import { attr } from './utils';
+import { attr, isDateFormatCode, defaultDateFormat } from './utils';
+import { isBuiltinDateFormat } from './number-format';
 
 const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 
@@ -108,6 +109,16 @@ export class StylePatcher {
     id = this.add('cellXfs', inner ? `${open}${inner}</${p}xf>` : open.replace(/>$/, '/>'));
     this.memo.set(key, id);
     return id;
+  }
+
+  // The format for date `d` in a cell of format `base`: `base` when it already shows dates, otherwise
+  // `base` with a date format, since a date in a General cell shows as its serial number
+  dateFormat(base: number, d: Date): number {
+    const xf = this.xfs[base] ?? this.added.cellXfs[base - this.xfs.length] ?? '';
+    const id = parseInt(attr(/^<[^>]*>/.exec(xf)?.[0] ?? '', 'numFmtId') ?? '0', 10);
+    const code = [...this.numFmts].find(([, v]) => v === id)?.[0];
+    if (isBuiltinDateFormat(id) || (code !== undefined && isDateFormatCode(code))) return base;
+    return this.patch(base, { numFmt: defaultDateFormat(d) });
   }
 
   toXml(): string {

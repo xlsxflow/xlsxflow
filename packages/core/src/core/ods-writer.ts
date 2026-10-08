@@ -4,7 +4,8 @@
 
 import { ZipStreamWriter, crc32 } from './zip-stream-writer';
 import { ODS_MIMETYPE } from './ods';
-import { colIndex, validateSheetName } from './utils';
+import { colIndex, dateToSerial, validateSheetName } from './utils';
+import { FormulaEngine, type FormulaResult } from './formula-engine';
 import type { CellValue, Row, StyledCell, WorkbookProperties } from './types';
 
 export interface OdsSheetOptions {
@@ -69,10 +70,12 @@ function textXml(s: string): string {
 const dateValue = (d: Date) => d.toISOString().slice(0, 19); // UTC, like SheetWriter
 const hasTime = (d: Date) => d.getTime() % 86400000 !== 0;
 
-function cellXml(cell: CellValue | StyledCell | undefined, span: string, covered: boolean): string {
+function cellXml(cell: CellValue | StyledCell | undefined, span: string, covered: boolean, evaluate: (formula: string) => FormulaResult): string {
   if (covered) return '<table:covered-table-cell/>';
-  const value = isStyledCell(cell!) ? cell.value : cell;
+  let value = isStyledCell(cell!) ? cell.value : cell;
   const formula = isStyledCell(cell!) && cell.formula ? ` table:formula="${escapeXml(toOpenFormula(cell.formula))}"` : '';
+  // A formula without a value gets its result stored, as SheetWriter does, for readers that don't recalculate
+  if (formula && value == null) value = evaluate((cell as StyledCell).formula!);
   if (value === null || value === undefined || (typeof value === 'number' && !isFinite(value))) {
     return formula || span ? `<table:table-cell${formula}${span}/>` : '<table:table-cell/>';
   }
@@ -168,6 +171,15 @@ export class OdsWriter {
         const merges = (sheet.options.mergeCells ?? []).map(parseRange);
         const lastMergeRow = Math.max(-1, ...merges.map(m => m.r2));
         const mergeAt = (r: number, c: number) => merges.find(m => m.r1 === r && m.c1 === c);
+        // Formulas resolve against the sheet they live in; streamed rows can't be looked back at
+        const engine = new FormulaEngine();
+        if (Array.isArray(sheet.rows)) {
+          engine.loadData(sheet.rows.map(row => row.map(cell => {
+            const v = isStyledCell(cell) ? cell.value : cell;
+            return v instanceof Date ? dateToSerial(v) : v ?? null;
+          })));
+        }
+        const evaluate = (f: string) => engine.evaluate(f);
         const covered = (r: number, c: number) => merges.some(m => r >= m.r1 && r <= m.r2 && c >= m.c1 && c <= m.c2 && (r !== m.r1 || c !== m.c1));
 
         let r = 0, batch = '';
@@ -177,7 +189,7 @@ export class OdsWriter {
           for (let c = 0; c < width; c++) {
             const m = mergeAt(r, c);
             const span = m ? ` table:number-columns-spanned="${m.c2 - m.c1 + 1}" table:number-rows-spanned="${m.r2 - m.r1 + 1}"` : '';
-            xml += cellXml(row[c], span, covered(r, c));
+            xml += cellXml(row[c], span, covered(r, c), evaluate);
           }
           r++;
           return xml + (width ? '' : '<table:table-cell/>') + '</table:table-row>';

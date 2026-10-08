@@ -11,7 +11,15 @@ export async function sheetToJson<T = Record<string, CellValue>>(
   for await (const row of parseResult) {
     if (skip-- > 0) continue;
     if (headers.length === 0) {
-      headers = row.cells.map((c, i) => (c !== null && c !== undefined ? String(c) : `Column${i + 1}`));
+      const seen = new Set<string>();
+      headers = row.cells.map((c, i) => {
+        const base = c !== null && c !== undefined ? String(c) : `Column${i + 1}`;
+        // A repeated header gets a suffix ("Name_2") so its column isn't lost
+        let name = base;
+        for (let n = 2; seen.has(name); n++) name = `${base}_${n}`;
+        seen.add(name);
+        return name;
+      });
       continue;
     }
 
@@ -251,6 +259,9 @@ export function encodeXString(s: string): string {
     .replace(/_(?=x[0-9A-Fa-f]{4}_)/g, '_x005F_')
     .replace(/[\x00-\x08\x0B\x0C\r\x0E-\x1F]/g, c => `_x${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}_`);
 }
+
+// The format SheetWriter gives a date without one: the time only when there is one
+export const defaultDateFormat = (d: Date) => d.getTime() % 86400000 === 0 ? 'yyyy-mm-dd' : 'yyyy-mm-dd hh:mm:ss';
 
 // True when a number format renders dates/times. Ignores quoted text, escapes, colours and
 // locale tags, so "0 \"days\"", "[Red]0.0" and "#,##0 \"USD\"" are not mistaken for dates.

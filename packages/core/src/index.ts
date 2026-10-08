@@ -15,6 +15,7 @@ export { readSharedStrings } from './core/index';
 export { ZipRandomAccessParser } from './core/zip-random-access';
 export { ZipStreamWriter, crc32 } from './core/zip-stream-writer';
 export { CfbReader, isCfb, type CfbEntry } from './core/cfb';
+export { StylePatcher } from './core/style-patcher';
 export {
   resolveWorkbookParts, partRelationships, recalcOnOpen, mapFormulaRefs, shiftFormula, dateToSerial,
   colIndex, colLetter, encodeXString, decodeXString,
