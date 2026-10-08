@@ -165,14 +165,14 @@ export default function SheetDemo() {
 
       {/* Formula bar */}
       <div className="flex items-stretch border-b border-grid text-[13px] font-mono">
-        <span className="w-[72px] shrink-0 px-2 py-1.5 border-r border-grid text-muted">{rows.length ? `${columnName(sc)}${selRow?.n ?? ""}` : ""}</span>
+        <span className="w-18 shrink-0 px-2 py-1.5 border-r border-grid text-muted">{rows.length ? `${columnName(sc)}${selRow?.n ?? ""}` : ""}</span>
         <span className="px-2 py-1.5 border-r border-grid text-muted italic font-sans" aria-hidden>fx</span>
         <output className="px-2 py-1.5 truncate min-w-0 flex-1" aria-label="Selected cell">{bar}</output>
       </div>
 
       {/* Grid */}
       <div
-        className="overflow-auto h-[360px] sm:h-[420px] outline-none focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+        className="overflow-auto h-90 sm:h-105 outline-none focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
         tabIndex={0}
         role="region"
         aria-label={`Cells of ${sheet ?? "the sheet"}. Use the arrow keys to move.`}
