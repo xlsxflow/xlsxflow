@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.4
+
+Fixes from the third round of end-user tests (700 cases).
+
+### Fixed
+
+- `XlsxFlow.readFile` reads `.ods` files, and `getComments()` / `getImages()` work after reading an `.xlsx` with it.
+- Control characters and U+FFFE/U+FFFF never reach the XML: cell text keeps them as `_xHHHH_` escapes, other text (document properties, notes' authors, validations, headers and footers, table columns, alt text, formulas) drops them, and sheet names with them are refused.
+- `SheetWriter` stores formula text that starts with `#` as text, not as an error cell Excel repairs.
+- `SheetWriter` waits while nobody reads its output, instead of pulling rows from the source without limit, and cancelling the output ends the row source (its `finally` runs).
+- Cached formula results: formulas over other formula cells, scientific literals (`1E3`), reversed ranges, case-insensitive text comparison, values typed into `SUM`, 15-digit number text, `TRUE`/`FALSE` text, errors (`#DIV/0!`, `#VALUE!`) and circular references follow Excel. Streamed rows get no made-up cached values (in `OdsWriter` too).
+- `SheetWriter` refuses overlapping or malformed merges, overlapping tables, table names that look like cell references, defined names over 255 characters, row options outside rows 1 to 1,048,576, list validations over 255 characters, truncated images, and picture sizes that are not positive numbers. Validation formulas lose a leading `=`, and every range of a multi-range print area names its sheet.
+- `SheetEditor.appendSheet` writes dates, formulas, styles and NaN as `setCells` does, keeps both batches when called twice, writes rows in the sheet's namespace, and refuses rows past 1,048,576.
+- `SheetEditor`: `setCells` edits the right row on sheets whose rows have no `r` attribute; a date and a style on one cell keep both; repeating a restyle reuses the formats it added; `insertRows` keeps ranges ending at the last row (`SUM(B1:B1048576)`), leaves references to other workbooks (`[1]S!A5`) alone, moves every cell of a shared formula on another sheet, and moves pivot tables on the sheet.
+- `SheetReader`: entries whose data does not match their CRC-32, and worksheets cut off mid-row, are errors instead of silently different data. A zip comment holding the end-record signature, part names in another case, UTF-16 parts, rows with an unusable `r`, `t="d"` cells (now UTC ISO strings, formatted with their date format), sheet names with `&amp;`, and a chart sheet as the first tab are read correctly.
+- `sheetToJson` keeps values right of the header row (`Column3`); `streamToCsv` keeps blank rows between rows.
+- `parseCsv` keeps numbers that overflow a double (`1e400`) as text.
+- `OdsWriter` keeps the milliseconds of dates and converts whole-column references (`SUM(C:C)`); the `.ods` reader reads the created date as UTC.
+- ZIP: UTF-8 entry names set the UTF-8 flag, 65,535 entries are refused (readers take 0xFFFF as ZIP64), and an encrypted or `.xls` file given where a ZIP is expected says so.
+
+### Added
+
+- The `errors` parse option: `row.errors` marks cells holding error values.
+
 ## 1.1.3
 
 ### Fixed

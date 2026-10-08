@@ -73,6 +73,7 @@ Dates come back as ISO-8601 strings. Opt in to more detail, each indexed like `r
 - `{ formulas: true }` gives `row.formulas`, with shared formulas expanded per cell.
 - `{ styles: true }` gives `row.styles`, as `CellStyle` objects (the same shape the writer takes). Theme and palette colours are resolved to ARGB.
 - `{ richText: true }` gives `row.richText`, the formatted runs of cells that have them. `row.cells` still holds the plain text.
+- `{ errors: true }` gives `row.errors`, `true` for the cells that hold an error value such as `#N/A`. `row.cells` gives errors as text, so this tells them from text that reads `#N/A` (`.xlsx` only).
 - `{ formatted: true }` gives `row.formatted`, each cell's text as Excel (en-US) shows it: `1,234.50`, `25.6%`, `(42)`, `08-Oct-2026 2:05 PM`. It covers sections, conditions, dates and elapsed times, fractions, scientific notation, currency and text formats. Repeat fills (`*`) and colours are left out, and other locales are shown as en-US.
 
 `await reader.readWorkbook(createBlobReader(blob))` lists the sheets with their visibility, the defined names and the document properties, without reading any sheet.
@@ -180,7 +181,7 @@ editor.setCells('Sheet1', {
   A1: { style: { font: { bold: true }, fill: { type: 'solid', fgColor: 'FFFFFF00' } } }, // restyle, keep content
   B3: { value: 7, style: { numFmt: '0.00' } },
 });
-editor.appendSheet('Sheet1', [['new', 'row']]); // appended after the last existing row
+editor.appendSheet('Sheet1', [['new', 'row']]); // after the last existing row (values, formulas, styles)
 editor.insertRows('Sheet1', 5, 3);  // 3 empty rows before row 5
 editor.deleteRows('Sheet1', 20, 2); // rows 20-21
 editor.insertColumns('Sheet1', 'C');  // or deleteColumns('Sheet1', 'C', 2)
@@ -193,10 +194,10 @@ Edited cells keep their style. A style change is merged into the cell's current 
 
 Macro-enabled workbooks (`.xlsm`) keep their VBA project and content type through every edit.
 
-`addSheet` takes an array of rows with values, formulas and styles; for hyperlinks, notes and sheet options, write the workbook with `SheetWriter`. `deleteSheet` removes names scoped to the sheet and turns other defined names that point at it into `#REF!`; formulas in other sheets that point at it are not rewritten. `insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move everything that points at the cells, as Excel does:
+`addSheet` and `appendSheet` take arrays of rows with values, formulas and styles; for hyperlinks, notes and sheet options, write the workbook with `SheetWriter`. Calling `appendSheet` again for a sheet adds the rows after the earlier ones. `deleteSheet` removes names scoped to the sheet and turns other defined names that point at it into `#REF!`; formulas in other sheets that point at it are not rewritten. `insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move everything that points at the cells, as Excel does:
 - formulas on every sheet and the workbook's defined names (print areas, named ranges);
 - merged cells, conditional formats, validations, hyperlinks, the filter and its column filters, page breaks and column widths;
-- tables, pictures, notes, sparklines, What-If data tables, chart series and pivot-table sources.
+- tables, pictures, notes, sparklines, What-If data tables, chart series, and pivot tables and their sources.
 
 Ranges that span inserted rows or columns grow, and ranges over deleted ones shrink. References to deleted cells become `#REF!`. Columns inserted inside a table become table columns named Column1, Column2 and so on. Deleting a table's header row, all its data rows or all its columns is refused. Operations run in the order given, and `setCells` addresses count after the cells have moved. Inserted rows and columns are empty: they don't copy the formatting of their neighbours. Every sheet streams through the editor, because any of its formulas might point at the moved cells.
 
@@ -250,7 +251,7 @@ writer.addSheet('Report', rows, {
 // Formatted notes: comment: { text: [{ text: 'Ana:', font: { bold: true } }, { text: ' restated' }] }
 ```
 
-Formulas are stored for Excel to calculate when it opens the file. For array rows, the writer also stores a cached result for simple formulas (`SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX`, `IF`, `CONCATENATE` and arithmetic), so other readers see a value.
+Formulas are stored for Excel to calculate when it opens the file. For array rows, the writer also stores a cached result for simple formulas (`SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX`, `IF`, `CONCATENATE`, `&`, comparisons and arithmetic, including over other formula cells), so other readers see a value. Errors are stored as error values (`#DIV/0!`). Rows from an AsyncIterable get no cached results, since the writer cannot look back at them.
 
 Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when values repeat, but the distinct strings stay in memory until the file is finished.
 

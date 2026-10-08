@@ -10,7 +10,8 @@ const NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 
 function convertField(s: string): CellValue {
   if (s === '') return null;
-  if (NUMBER.test(s)) return Number(s);
+  // "1e400" overflows a double: keep the text rather than lose it to Infinity
+  if (NUMBER.test(s) && isFinite(Number(s))) return Number(s);
   const upper = s.toUpperCase();
   return upper === 'TRUE' ? true : upper === 'FALSE' ? false : s;
 }

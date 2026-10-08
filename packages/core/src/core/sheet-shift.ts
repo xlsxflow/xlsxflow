@@ -271,7 +271,12 @@ export function createShiftTransform(sheet: string, maps: ShiftMaps): TransformS
           if (expand) xml = `<${p}f>${escapeXml(mapped)}</${p}f>`;
         } else {
           const a = shared.get(si);
-          if (a?.expand) xml = `<${p}f>${escapeXml(mapF(shiftFormula(a.text, r - a.row, c - a.col)))}</${p}f>`;
+          if (a) {
+            // Even when the anchor's own references stay, this cell's may point into moved rows
+            const own = shiftFormula(a.text, r - a.row, c - a.col);
+            const mapped = mapF(own);
+            if (a.expand || mapped !== own) xml = `<${p}f>${escapeXml(mapped)}</${p}f>`;
+          }
         }
       } else if (kind === 'dataTable') {
         // A What-If data table: its result range and its input cells (r1, r2) follow their cells
@@ -444,6 +449,11 @@ export function mapChart(xml: string, maps: ShiftMaps): string {
     return open + escapeXml(mapped) + close;
   });
   return changed ? out.replace(/<((?:\w+:)?)(numCache|strCache)\b[\s\S]*?<\/\1\2>/g, '') : xml;
+}
+
+// A pivot table on a sheet whose rows or columns move is drawn where its cells went
+export function mapPivotTable(xml: string, s: SheetShift): string {
+  return xml.replace(/(<(?:\w+:)?location\b[^>]*?\sref=")([^"]*)"/, (_m, pre: string, ref: string) => `${pre}${mapArea(ref, s) ?? ref}"`);
 }
 
 // A pivot cache over moved cells reads the new range and refreshes when the file opens

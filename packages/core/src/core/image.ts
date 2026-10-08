@@ -1,5 +1,5 @@
 import type { SheetImage } from './types';
-import { colIndex, colLetter, MAX_COLUMNS, MAX_ROWS, partRelationships, unescapeXml, xmlElements } from './utils';
+import { colIndex, colLetter, MAX_COLUMNS, MAX_ROWS, partRelationships, unescapeXml, xmlElements, escapeXml } from './utils';
 
 const EMU_PER_PX = 9525;
 
@@ -7,6 +7,13 @@ export interface ImageInfo { ext: 'png' | 'jpeg' | 'gif'; width: number; height:
 
 // Format and pixel size from the file header
 export function imageInfo(b: Uint8Array): ImageInfo {
+  const info = headerInfo(b);
+  // A truncated header reads past the end of the bytes and gives NaN (or 0) sizes
+  if (!(info.width > 0 && info.height > 0)) throw new Error(`The ${info.ext.toUpperCase()} image is truncated or has no size.`);
+  return info;
+}
+
+function headerInfo(b: Uint8Array): ImageInfo {
   const be16 = (i: number) => (b[i] << 8) | b[i + 1];
   const be32 = (i: number) => ((b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3]) >>> 0;
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
@@ -81,8 +88,6 @@ export async function readSheetImages(
 }
 
 
-const escapeXml = (s: string) =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 const cellPos = (ref: string) => {
   const m = /^\$?([A-Za-z]{1,3})\$?(\d+)$/.exec(ref.trim());
@@ -104,6 +109,9 @@ export const DRAWING_NS = 'xmlns:xdr="http://schemas.openxmlformats.org/drawingm
 // none; a missing side keeps its aspect ratio. `attrs` lands on the anchor element, e.g. DRAWING_NS
 // when the anchor is added to a drawing that declares other prefixes.
 export function anchorXml(place: Placement, natural: { width: number; height: number }, body: string, attrs = ''): string {
+  if (!place || typeof (place as any).range !== 'string' && typeof (place as any).at !== 'string') {
+    throw new Error('A picture or chart needs a placement: "at" (a cell) or "range".');
+  }
   if ('range' in place) {
     const [from, to = from] = place.range.split(':');
     const a = cellPos(from), b = cellPos(to);
@@ -115,6 +123,9 @@ export function anchorXml(place: Placement, natural: { width: number; height: nu
   const { width: w, height: h } = natural;
   const width = place.width ?? (place.height ? w * place.height / h : w);
   const height = place.height ?? h * width / w;
+  if (!(width > 0 && height > 0 && isFinite(width) && isFinite(height))) {
+    throw new Error(`Invalid size ${place.width ?? ''}x${place.height ?? ''} at ${place.at}: width and height must be positive numbers.`);
+  }
   return `<xdr:oneCellAnchor${attrs}>${marker('from', cellPos(place.at))}<xdr:ext cx="${Math.round(width * EMU_PER_PX)}" cy="${Math.round(height * EMU_PER_PX)}"/>${body}<xdr:clientData/></xdr:oneCellAnchor>`;
 }
 

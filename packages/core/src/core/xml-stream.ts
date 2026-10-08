@@ -39,7 +39,7 @@ type Pending = 'text' | 'tag' | 'cdata' | 'comment' | null;
 // Emits one array of tokens per input chunk. Per-token stream chunks cost a promise round-trip
 // each (~5 per cell), which dominated read time; batching removes that overhead.
 export function createXmlBatchParser(): TransformStream<Uint8Array, XmlToken[]> {
-  const decoder = new TextDecoder();
+  let decoder: TextDecoder | undefined;
   let buffer = '';
   let isFirstChunk = true;
 
@@ -52,6 +52,8 @@ export function createXmlBatchParser(): TransformStream<Uint8Array, XmlToken[]> 
 
   return new TransformStream({
     transform(chunk, controller) {
+      // XML parsers must read UTF-16 as well as UTF-8; a UTF-16 part starts with its byte-order mark
+      decoder ??= new TextDecoder(chunk[0] === 0xff && chunk[1] === 0xfe ? 'utf-16le' : chunk[0] === 0xfe && chunk[1] === 0xff ? 'utf-16be' : 'utf-8');
       buffer += decoder.decode(chunk, { stream: true });
       if (isFirstChunk) {
         if (buffer.charCodeAt(0) === 0xFEFF) {
@@ -157,7 +159,7 @@ export function createXmlBatchParser(): TransformStream<Uint8Array, XmlToken[]> 
       if (out.length) controller.enqueue(out);
     },
     flush(controller) {
-      buffer += decoder.decode();
+      buffer += decoder?.decode() ?? '';
       // Handle trailing text if any
       if (buffer.length > 0 && pending !== 'tag' && pending !== 'cdata' && pending !== 'comment') {
          controller.enqueue([{ type: 'text', value: unescapeXml(normalizeEol(buffer)) }]);

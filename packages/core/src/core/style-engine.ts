@@ -1,9 +1,7 @@
-import { argb } from './utils';
+import { argb, escapeXml as escapeText } from './utils';
 import { CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, HighlightStyle } from './types';
 
-function escapeXml(val: unknown): string {
-  return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+const escapeXml = (val: unknown) => escapeText(String(val));
 
 // Child elements of a <font> (styles) or, with nameTag "rFont", of a rich text run's <rPr>
 export function fontXml(font: CellFont, nameTag = 'name'): string {

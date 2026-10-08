@@ -25,6 +25,7 @@ export interface ParseOptions {
   styles?: boolean;   // report cell styles in RowData.styles
   richText?: boolean; // report formatted text runs in RowData.richText
   formatted?: boolean; // report each cell's text as Excel shows it (en-US) in RowData.formatted
+  errors?: boolean;    // mark error cells (#N/A, #DIV/0!) in RowData.errors (.xlsx only)
 }
 
 const DEFAULT_MAX_PART_BYTES = 1 << 30;
@@ -98,15 +99,16 @@ export class SheetReader {
     for (const [tag] of parts.workbookXml.matchAll(/<(?:\w+:)?sheet\b[^>]*>/g)) {
       const name = attr(tag, 'name');
       const state = attr(tag, 'state');
-      if (name !== null) sheets.push({ name: unescapeXml(name), state: state === 'hidden' || state === 'veryHidden' ? state : 'visible' });
+      if (name !== null) sheets.push({ name, state: state === 'hidden' || state === 'veryHidden' ? state : 'visible' });
     }
     const definedNames: DefinedName[] = [];
     for (const { attrs: open, body: text } of xmlElements(parts.workbookXml, 'definedName')) {
       const local = attr(open, 'localSheetId');
       const comment = attr(open, 'comment');
-      const name: DefinedName = { name: unescapeXml(attr(open, 'name') ?? ''), ref: unescapeXml(text) };
+      // attr() has already unescaped attribute values; only element text is still escaped
+      const name: DefinedName = { name: attr(open, 'name') ?? '', ref: unescapeXml(text) };
       if (local !== null && sheets[+local]) name.sheet = sheets[+local].name;
-      if (comment !== null) name.comment = unescapeXml(comment);
+      if (comment !== null) name.comment = comment;
       if (/^(?:1|true)$/.test(attr(open, 'hidden') ?? '')) name.hidden = true;
       definedNames.push(name);
     }
@@ -153,7 +155,8 @@ export class SheetReader {
       worksheetZipPath = parts.sheets.get(options.sheetName);
       if (!worksheetZipPath) throw new Error(`Sheet with name "${options.sheetName}" not found in workbook.`);
     } else {
-      worksheetZipPath = parts.sheets.values().next().value
+      // The first tab with cells: a chart sheet first in the tab order is skipped, as the .xls reader does
+      worksheetZipPath = [...parts.sheets.values()].find(path => !parts.chartsheets.has(path))
         ?? zip.getFiles().find(f => /^xl\/worksheets\/[^/]+\.xml$/.test(f));
       if (!worksheetZipPath) throw new Error("No worksheets found in ZIP.");
     }
@@ -187,6 +190,7 @@ export class SheetReader {
       .pipeThrough(createXmlBatchParser());
     return parseWorksheet(xmlStream, sharedStrings, styles, is1904, {
       formulas: options?.formulas,
+      errors: options?.errors,
       cellStyles: options?.styles ? cellStyles : undefined,
       numFmts: options?.formatted ? formats : undefined,
       richText: options?.richText ? color : undefined,

@@ -1,5 +1,5 @@
 import { XmlToken } from './xml-stream';
-import { decodeXString, colIndex, shiftFormula, MAX_COLUMNS, unescapeXml, xmlElements } from './utils';
+import { decodeXString, colIndex, shiftFormula, dateToSerial, MAX_COLUMNS, unescapeXml, xmlElements } from './utils';
 import { applyFontElement, ColorResolver } from './style-reader';
 import { formatValue } from './number-format';
 import type { CellStyle, RichTextRun, SheetImage } from './types';
@@ -109,10 +109,14 @@ export interface RowData {
   styles?: (CellStyle | undefined)[]; // shared between cells with the same style: do not mutate
   richText?: (RichTextRun[] | undefined)[]; // only cells whose text has formatted runs
   formatted?: (string | undefined)[]; // with the `formatted` option: each cell's text as Excel shows it
+  // With the `errors` option (.xlsx only): true for cells holding an error value such as #N/A, which
+  // `cells` gives as text, to tell them from text that reads "#N/A"
+  errors?: (true | undefined)[];
 }
 
 export interface WorksheetOptions {
   formulas?: boolean;
+  errors?: boolean;
   cellStyles?: (CellStyle | undefined)[]; // by style index; set to report styles
   numFmts?: (string | undefined)[];         // number format code by style index; set to report formatted text
   richText?: ColorResolver;                // set to report rich text runs
@@ -148,6 +152,14 @@ export class ParseResult implements AsyncIterable<RowData> {
   getComments(): Promise<SheetComment[]> {
     return this.comments();
   }
+}
+
+// "2026-10-08T14:05:00" or "2026-10-08" (a t="d" cell, no zone: UTC) as an ISO string; undefined when unreadable
+function isoDateCell(text: string): string | undefined {
+  const t = text.trim();
+  const zoned = /(?:Z|[+-]\d\d:?\d\d)$/.test(t) ? t : t.includes('T') ? t + 'Z' : t + 'T00:00:00Z';
+  const d = new Date(zoned);
+  return isNaN(d.getTime()) ? undefined : d.toISOString();
 }
 
 export function parseWorksheet(
@@ -193,6 +205,7 @@ export function parseWorksheet(
     let rowStyles: (CellStyle | undefined)[] | undefined;
     let rowRichText: (RichTextRun[] | undefined)[] | undefined;
     let rowFormatted: (string | undefined)[] | undefined;
+    let rowErrors: (true | undefined)[] | undefined;
     let rawNumber: number | undefined; // a date cell's serial, for formatted text
     const runs = options.richText ? new RichTextCollector(options.richText) : undefined;
     
@@ -202,6 +215,7 @@ export function parseWorksheet(
     const sharedFormulas = new Map<string, { formula: string; row: number; col: number }>();
 
     let currentRowNumber = 0;
+    let openedWorksheet = false, closedWorksheet = false;
     let currentColIndex = 0;
     let currentCellCol = 0;
 
@@ -223,17 +237,16 @@ export function parseWorksheet(
               continue;
             }
 
+            if (token.name === 'worksheet') openedWorksheet = true;
             if (token.name === 'row') {
               inRow = true;
               currentRow = [];
               rowFormulas = rowStyles = rowRichText = rowFormatted = undefined;
+              rowErrors = undefined;
               currentColIndex = 0;
-              const r = token.attributes['r'];
-              if (r) {
-                currentRowNumber = parseInt(r, 10);
-              } else {
-                currentRowNumber++;
-              }
+              // A missing or unusable r ("abc", "0") means the row after the previous one
+              const r = Number(token.attributes['r']);
+              currentRowNumber = Number.isInteger(r) && r >= 1 ? r : currentRowNumber + 1;
               if (token.attributes['hidden'] === '1' || token.attributes['hidden'] === 'true') {
                 hiddenRows.push(currentRowNumber);
               }
@@ -307,12 +320,14 @@ export function parseWorksheet(
             }
             if (skipDepth > 0) continue;
 
+            if (token.name === 'worksheet') closedWorksheet = true;
             if (token.name === 'row') {
               const row: RowData = { rowNumber: currentRowNumber, cells: currentRow };
               if (rowFormulas) row.formulas = rowFormulas;
               if (rowStyles) row.styles = rowStyles;
               if (rowRichText) row.richText = rowRichText;
               if (rowFormatted) row.formatted = rowFormatted;
+              if (rowErrors) row.errors = rowErrors;
               yield row;
               inRow = false;
             } else if (token.name === 'c') {
@@ -338,10 +353,16 @@ export function parseWorksheet(
                   resolvedValue = currentCellValue === '1' || currentCellValue === 'true';
                 } else if (currentCellType === 'e') {
                   resolvedValue = currentCellValue;
+                  if (options.errors) (rowErrors ??= [])[currentCellCol] = true;
                 } else {
                   const num = Number(currentCellValue);
-                  if (isNaN(num)) {
-                    resolvedValue = currentCellValue; // e.g. t="d" ISO dates
+                  const iso = currentCellType === 'd' ? isoDateCell(currentCellValue) : undefined;
+                  if (iso) {
+                    // t="d": ISO text without a zone, read as UTC like serial dates
+                    rawNumber = dateToSerial(new Date(iso)) - (is1904 ? 1462 : 0);
+                    resolvedValue = iso;
+                  } else if (isNaN(num)) {
+                    resolvedValue = currentCellValue;
                   } else if (currentStyleId !== null && styles.get(currentStyleId) === 14) {
                     rawNumber = num;
                     resolvedValue = excelToIsoDate(num, is1904);
@@ -397,6 +418,8 @@ export function parseWorksheet(
           }
         }
       }
+      // A part cut off inside a row (an intact zip around a truncated sheet) must not read as a shorter sheet
+      if (inRow || inCell || openedWorksheet && !closedWorksheet) throw new Error('Worksheet XML is cut off: the sheet ends before its closing tags.');
       const hiddenCols: number[] = [];
       hiddenColMarks.forEach((hidden, c) => { if (hidden) hiddenCols.push(c); });
       resolveMeta({ mergedCells, hiddenRows, hiddenCols, freezePanes, hyperlinks });

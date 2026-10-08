@@ -4,8 +4,8 @@
 
 import { ZipStreamWriter, crc32 } from './zip-stream-writer';
 import { ODS_MIMETYPE } from './ods';
-import { colIndex, dateToSerial, validateSheetName } from './utils';
-import { FormulaEngine, type FormulaResult } from './formula-engine';
+import { colIndex, colLetter, dateToSerial, validateSheetName, escapeXml as escapeText } from './utils';
+import { FormulaEngine, FormulaError, type FormulaResult } from './formula-engine';
 import type { CellValue, Row, StyledCell, WorkbookProperties } from './types';
 
 export interface OdsSheetOptions {
@@ -19,17 +19,14 @@ export interface OdsWriterOptions {
   properties?: WorkbookProperties;
 }
 
-function escapeXml(val: unknown): string {
-  // XML 1.0 cannot hold most control characters at all, so they are dropped
-  return String(val).replace(/[\x00-\x08\x0B\x0C\x0E-\x1F￾￿]/g, '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+const escapeXml = (val: unknown) => escapeText(String(val));
 
 const isStyledCell = (v: CellValue | StyledCell): v is StyledCell =>
   v !== null && typeof v === 'object' && !(v instanceof Date);
 
 // Excel syntax to OpenFormula: "SUM(A1:B2,Sheet2!C3)" -> "of:=SUM([.A1:.B2];[$Sheet2.C3])"
-const REF = /((?:'(?:[^']|'')+'|[A-Za-z_][\w.]*)!)?(\$?[A-Za-z]{1,3}\$?\d+)(?::(\$?[A-Za-z]{1,3}\$?\d+))?(?![\w(!])/y;
+// Cell references and ranges, then whole columns (C:C) and whole rows (1:3)
+const REF = /((?:'(?:[^']|'')+'|[A-Za-z_][\w.]*)!)?(\$?[A-Za-z]{1,3}\$?\d+(?::\$?[A-Za-z]{1,3}\$?\d+)?|\$?[A-Za-z]{1,3}:\$?[A-Za-z]{1,3}|\$?\d+:\$?\d+)(?![\w(!:])/y;
 export function toOpenFormula(formula: string): string {
   const f = formula.replace(/^=/, '');
   let out = '';
@@ -49,7 +46,7 @@ export function toOpenFormula(formula: string): string {
       const m = REF.exec(f);
       if (m) {
         const sheet = m[1] ? `$${m[1].slice(0, -1)}` : '';
-        out += `[${sheet}.${m[2]}${m[3] ? `:${sheet}.${m[3]}` : ''}]`;
+        out += `[${m[2].split(':').map(part => `${sheet}.${part}`).join(':')}]`;
         i = REF.lastIndex;
         continue;
       }
@@ -67,15 +64,17 @@ function textXml(s: string): string {
     .replace(/^ | {2,}/g, m => m === ' ' ? '<text:s/>' : ` <text:s text:c="${m.length - 1}"/>`)}</text:p>`).join('');
 }
 
-const dateValue = (d: Date) => d.toISOString().slice(0, 19); // UTC, like SheetWriter
+// UTC, like SheetWriter; milliseconds only when there are some
+const dateValue = (d: Date) => d.toISOString().slice(0, d.getUTCMilliseconds() ? 23 : 19);
 const hasTime = (d: Date) => d.getTime() % 86400000 !== 0;
 
-function cellXml(cell: CellValue | StyledCell | undefined, span: string, covered: boolean, evaluate: (formula: string) => FormulaResult): string {
+// `evaluate` gives the formula's result, or null when it isn't known (streamed rows, errors)
+function cellXml(cell: CellValue | StyledCell | undefined, span: string, covered: boolean, evaluate: () => FormulaResult): string {
   if (covered) return '<table:covered-table-cell/>';
   let value = isStyledCell(cell!) ? cell.value : cell;
   const formula = isStyledCell(cell!) && cell.formula ? ` table:formula="${escapeXml(toOpenFormula(cell.formula))}"` : '';
   // A formula without a value gets its result stored, as SheetWriter does, for readers that don't recalculate
-  if (formula && value == null) value = evaluate((cell as StyledCell).formula!);
+  if (formula && value == null) value = evaluate();
   if (value === null || value === undefined || (typeof value === 'number' && !isFinite(value))) {
     return formula || span ? `<table:table-cell${formula}${span}/>` : '<table:table-cell/>';
   }
@@ -175,11 +174,16 @@ export class OdsWriter {
         const engine = new FormulaEngine();
         if (Array.isArray(sheet.rows)) {
           engine.loadData(sheet.rows.map(row => row.map(cell => {
+            if (isStyledCell(cell) && cell.formula) return { formula: cell.formula };
             const v = isStyledCell(cell) ? cell.value : cell;
             return v instanceof Date ? dateToSerial(v) : v ?? null;
           })));
         }
-        const evaluate = (f: string) => engine.evaluate(f);
+        const evaluate = (ref: string) => {
+          if (!Array.isArray(sheet.rows)) return null;
+          const v = engine.cellValue(ref);
+          return v instanceof FormulaError ? v.code : v;
+        };
         const covered = (r: number, c: number) => merges.some(m => r >= m.r1 && r <= m.r2 && c >= m.c1 && c <= m.c2 && (r !== m.r1 || c !== m.c1));
 
         let r = 0, batch = '';
@@ -189,7 +193,7 @@ export class OdsWriter {
           for (let c = 0; c < width; c++) {
             const m = mergeAt(r, c);
             const span = m ? ` table:number-columns-spanned="${m.c2 - m.c1 + 1}" table:number-rows-spanned="${m.r2 - m.r1 + 1}"` : '';
-            xml += cellXml(row[c], span, covered(r, c), evaluate);
+            xml += cellXml(row[c], span, covered(r, c), () => evaluate(colLetter(c) + (r + 1)));
           }
           r++;
           return xml + (width ? '' : '<table:table-cell/>') + '</table:table-row>';

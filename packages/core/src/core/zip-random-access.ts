@@ -1,4 +1,6 @@
 import { RandomAccessReader } from './random-access';
+import { crc32Update } from './zip-stream-writer';
+import { isCfb } from './cfb';
 
 export interface ZipRecord {
   filename: string;
@@ -11,6 +13,8 @@ export interface ZipRecord {
 
 export class ZipRandomAccessParser {
   private records = new Map<string, ZipRecord>();
+  // Part names are case-insensitive in OPC: a rels target "Sheet1.xml" finds "sheet1.xml"
+  private lowerCase = new Map<string, ZipRecord>();
 
   constructor(private reader: RandomAccessReader) {}
 
@@ -25,16 +29,23 @@ export class ZipRandomAccessParser {
     
     const dataView = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 
-    // Search backwards for the EOCD signature (0x06054b50)
+    // Search backwards for the EOCD signature (0x06054b50). The real record's comment reaches the end
+    // of the file, so the signature bytes inside a comment are skipped; failing that (junk appended
+    // after the archive), the last signature is used.
     let eocdOffset = -1;
     for (let i = buffer.length - 22; i >= 0; i--) {
-      if (dataView.getUint32(i, true) === 0x06054b50) {
+      if (dataView.getUint32(i, true) !== 0x06054b50) continue;
+      if (eocdOffset === -1) eocdOffset = i;
+      if (i + 22 + dataView.getUint16(i + 20, true) === buffer.length) {
         eocdOffset = i;
         break;
       }
     }
 
     if (eocdOffset === -1) {
+      if (isCfb(buffer.subarray(0, 8)) || searchStart > 0 && isCfb(await this.reader.read(0, 8))) {
+        throw new Error('This file is a compound file, not a ZIP: an .xls, or a workbook saved with a password. Decrypt it first with decryptWorkbook from @xlsxflow/pro.');
+      }
       throw new Error("End of Central Directory (EOCD) not found. This may not be a valid ZIP file.");
     }
 
@@ -80,14 +91,9 @@ export class ZipRandomAccessParser {
         throw new Error(`Security Exception: Path traversal detected in ZIP filename: ${filename}`);
       }
 
-      this.records.set(filename, {
-        filename,
-        compressionMethod,
-        crc,
-        compressedSize,
-        uncompressedSize,
-        localHeaderOffset
-      });
+      const record = { filename, compressionMethod, crc, compressedSize, uncompressedSize, localHeaderOffset };
+      this.records.set(filename, record);
+      if (!this.lowerCase.has(filename.toLowerCase())) this.lowerCase.set(filename.toLowerCase(), record);
 
       offset += 46 + filenameLength + extraFieldLength + fileCommentLength;
     }
@@ -103,7 +109,7 @@ export class ZipRandomAccessParser {
   }
 
   has(filename: string): boolean {
-    return this.records.has(filename);
+    return this.records.has(filename) || this.lowerCase.has(filename.toLowerCase());
   }
 
   getFiles(): string[] {
@@ -111,7 +117,7 @@ export class ZipRandomAccessParser {
   }
 
   getRecord(filename: string): ZipRecord {
-    const record = this.records.get(filename);
+    const record = this.records.get(filename) ?? this.lowerCase.get(filename.toLowerCase());
     if (!record) throw new Error(`File ${filename} not found in ZIP.`);
     return record;
   }
@@ -145,16 +151,25 @@ export class ZipRandomAccessParser {
       throw new Error(`Unsupported compression method ${record.compressionMethod} for ${filename}`);
     }
     const stream = await this.extractRawStream(filename);
-    if (record.compressionMethod === 0) return stream;
+    const data = record.compressionMethod === 0 ? stream
+      : stream.pipeThrough(new DecompressionStream('deflate-raw') as any as TransformStream<Uint8Array, Uint8Array>);
 
     // Node reports bad deflate data as a bare TypeError; name the entry instead
-    const inflated = stream.pipeThrough(new DecompressionStream('deflate-raw') as any as TransformStream<Uint8Array, Uint8Array>).getReader();
+    const inflated = data.getReader();
     let total = 0;
+    let crc = 0xffffffff;
     return new ReadableStream<Uint8Array>({
       async pull(controller) {
         try {
           const { done, value } = await inflated.read();
-          if (done) return controller.close();
+          if (done) {
+            // Changed bytes must fail, not read as different data
+            if (total !== record.uncompressedSize || ((crc ^ 0xffffffff) >>> 0) !== record.crc) {
+              return controller.error(new Error(`Corrupt ZIP entry ${filename}: its data does not match the size and CRC-32 in the directory`));
+            }
+            return controller.close();
+          }
+          crc = crc32Update(crc, value);
           // The directory states each entry's size; inflating past it means a crafted entry (a zip bomb)
           total += value.length;
           if (total > record.uncompressedSize) {

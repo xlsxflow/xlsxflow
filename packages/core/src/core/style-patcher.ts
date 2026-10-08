@@ -1,9 +1,9 @@
 import { CellStyle, CellFont } from './types';
 import { fontXml, fillXml, borderSideXml, alignmentAttrs } from './style-engine';
-import { attr, isDateFormatCode, defaultDateFormat } from './utils';
+import { attr, isDateFormatCode, defaultDateFormat, escapeXml } from './utils';
 import { isBuiltinDateFormat } from './number-format';
 
-const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const escapeAttr = escapeXml;
 
 const FONT_TAGS: [keyof CellFont, string][] = [
   ['bold', 'b'], ['italic', 'i'], ['underline', 'u'], ['size', 'sz'], ['color', 'color'], ['name', 'name'],
@@ -25,7 +25,7 @@ function setAttr(open: string, name: string, value: string): string {
 export class StylePatcher {
   private p: string;
   private fonts: string[];
-  private fills: number;
+  private fills: string[];
   private borders: string[];
   private xfs: string[];
   private numFmts = new Map<string, number>();
@@ -36,7 +36,7 @@ export class StylePatcher {
   constructor(private xml: string) {
     this.p = /<((?:\w+:)?)styleSheet\b/.exec(xml)?.[1] ?? '';
     this.fonts = this.items('fonts', 'font');
-    this.fills = this.items('fills', 'fill').length;
+    this.fills = this.items('fills', 'fill');
     this.borders = this.items('borders', 'border');
     this.xfs = this.items('cellXfs', 'xf');
     for (const tag of this.items('numFmts', 'numFmt')) {
@@ -58,13 +58,14 @@ export class StylePatcher {
     if (id !== undefined) return id;
 
     const p = this.p;
-    const xf = this.xfs[base] ?? this.xfs[0] ?? `<${p}xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`;
+    // `base` may be a format added earlier in this edit (a date format, then a style)
+    const xf = this.at('cellXfs', base) ?? this.xfs[0] ?? `<${p}xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`;
     let open = /^<[^>]*>/.exec(xf)![0];
     let inner = open.endsWith('/>') ? '' : xf.slice(open.length, xf.lastIndexOf('<'));
     open = open.replace(/\s*\/>$/, '>');
 
     if (style.font) {
-      const old = this.fonts[parseInt(attr(open, 'fontId') ?? '0', 10)] ?? '';
+      const old = this.at('fonts', parseInt(attr(open, 'fontId') ?? '0', 10)) ?? '';
       let font = old.endsWith('/>') ? '' : old.replace(/^<[^>]*>/, '').replace(/<\/[^>]*>$/, '');
       for (const [key, tag] of FONT_TAGS) {
         if (!(key in style.font)) continue;
@@ -79,7 +80,7 @@ export class StylePatcher {
       open = setAttr(setAttr(open, 'fillId', String(this.add('fills', this.prefix(fillXml(style.fill))))), 'applyFill', '1');
     }
     if (style.border) {
-      const old = this.borders[parseInt(attr(open, 'borderId') ?? '0', 10)] ?? `<${p}border/>`;
+      const old = this.at('borders', parseInt(attr(open, 'borderId') ?? '0', 10)) ?? `<${p}border/>`;
       const element = (tag: string) => new RegExp(`<${p}${tag}\\b[^>]*?(?:/>|>[\\s\\S]*?</${p}${tag}>)`).exec(old)?.[0];
       const sides = SIDES.map(side => side in style.border!
         ? this.prefix(borderSideXml(side, style.border![side])) : element(side) ?? `<${p}${side}/>`);
@@ -114,7 +115,7 @@ export class StylePatcher {
   // The format for date `d` in a cell of format `base`: `base` when it already shows dates, otherwise
   // `base` with a date format, since a date in a General cell shows as its serial number
   dateFormat(base: number, d: Date): number {
-    const xf = this.xfs[base] ?? this.added.cellXfs[base - this.xfs.length] ?? '';
+    const xf = this.at('cellXfs', base) ?? '';
     const id = parseInt(attr(/^<[^>]*>/.exec(xf)?.[0] ?? '', 'numFmtId') ?? '0', 10);
     const code = [...this.numFmts].find(([, v]) => v === id)?.[0];
     if (isBuiltinDateFormat(id) || (code !== undefined && isDateFormatCode(code))) return base;
@@ -148,15 +149,29 @@ export class StylePatcher {
   }
 
   private existing(section: 'numFmts' | 'fonts' | 'fills' | 'borders' | 'cellXfs'): number {
-    return section === 'fonts' ? this.fonts.length : section === 'fills' ? this.fills
-      : section === 'borders' ? this.borders.length : section === 'cellXfs' ? this.xfs.length
-        : this.items('numFmts', 'numFmt').length;
+    return section === 'numFmts' ? this.items('numFmts', 'numFmt').length : this.list(section).length;
   }
 
-  // Appends an element to a section, returning its index
+  private list(section: 'fonts' | 'fills' | 'borders' | 'cellXfs'): string[] {
+    return section === 'fonts' ? this.fonts : section === 'fills' ? this.fills : section === 'borders' ? this.borders : this.xfs;
+  }
+
+  // Item `i` of a section, counting the ones added in this edit after the file's own
+  private at(section: 'fonts' | 'fills' | 'borders' | 'cellXfs', i: number): string | undefined {
+    const own = this.list(section);
+    return i < own.length ? own[i] : this.added[section][i - own.length];
+  }
+
+  // The index of `element` in a section, appending it unless an identical one is already there:
+  // repeating the same restyle on an edited file reuses the formats the first run added
   private add(section: 'fonts' | 'fills' | 'borders' | 'cellXfs', element: string): number {
+    const own = this.list(section);
+    const found = own.indexOf(element);
+    if (found >= 0) return found;
+    const added = this.added[section].indexOf(element);
+    if (added >= 0) return own.length + added;
     this.added[section].push(element);
-    return this.existing(section) + this.added[section].length - 1;
+    return own.length + this.added[section].length - 1;
   }
 
   private items(section: string, tag: string): string[] {

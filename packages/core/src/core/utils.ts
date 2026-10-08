@@ -23,6 +23,14 @@ export async function sheetToJson<T = Record<string, CellValue>>(
       continue;
     }
 
+    // Values right of the header row get their own column name, as blank headers do
+    for (let i = headers.length; i < row.cells.length; i++) {
+      if (row.cells[i] === null || row.cells[i] === undefined) continue;
+      let name = `Column${i + 1}`;
+      for (let n = 2; headers.includes(name); n++) name = `Column${i + 1}_${n}`;
+      while (headers.length < i) headers.push(`Column${headers.length + 1}`);
+      headers.push(name);
+    }
     const obj: any = {};
     for (let i = 0; i < headers.length; i++) {
       const value = row.cells[i] ?? null;
@@ -47,9 +55,12 @@ function escapeCsv(val: any): string {
 
 export async function streamToCsv(parseResult: ParseResult): Promise<string> {
   const rows: string[] = [];
+  let last = 0;
   for await (const row of parseResult) {
-    const csvRow = row.cells.map(escapeCsv).join(',');
-    rows.push(csvRow);
+    // Rows missing between rows are blank lines, as in Excel's CSV export, so nothing shifts up
+    for (let gap = last ? row.rowNumber - last - 1 : 0; gap > 0; gap--) rows.push('');
+    last = row.rowNumber;
+    rows.push(row.cells.map(escapeCsv).join(','));
   }
   return rows.join('\n');
 }
@@ -95,6 +106,7 @@ export interface WorkbookParts {
   workbookPath: string;
   workbookXml: string;
   sheets: Map<string, string>;   // sheet name -> ZIP entry path, in tab order
+  chartsheets: Set<string>;      // paths in `sheets` that are chart sheets (no cells)
   sharedStrings?: string;
   styles?: string;
   theme?: string;
@@ -108,14 +120,16 @@ export async function resolveWorkbookParts(readText: (path: string) => Promise<s
   const rels = parseRels(await readText(relsPathOf(workbookPath)), dirOf(workbookPath));
 
   const sheets = new Map<string, string>();
+  const chartsheets = new Set<string>();
   for (const [tag] of workbookXml.matchAll(/<(?:\w+:)?sheet\b[^>]*>/g)) {
     const name = attr(tag, 'name');
     const rId = attr(tag, 'r:id') ?? attr(tag, '\\w+:id');
     const rel = rId ? rels.find(r => r.id === rId && !r.external) : undefined;
     if (name && rel) sheets.set(name, rel.path);
+    if (rel?.type.endsWith('/chartsheet')) chartsheets.add(rel.path);
   }
   return {
-    workbookPath, workbookXml, sheets,
+    workbookPath, workbookXml, sheets, chartsheets,
     sharedStrings: byType(rels, '/sharedStrings'), styles: byType(rels, '/styles'), theme: byType(rels, '/theme'),
   };
 }
@@ -215,16 +229,21 @@ export function mapFormulaRefs(formula: string, mapCol: RefMapper, mapRow: RefMa
       let sheet: string | undefined;
       if (isEnd) sheet = prevSheet;
       else if (before.endsWith('!')) {
-        sheet = /([A-Za-z0-9_.\u00C0-\uFFFF]+)!$/.exec(before)?.[1]
-          ?? (offset === 1 && i > 0 && parts[i - 1].startsWith("'") ? unquoteSheet(parts[i - 1]) : undefined);
+        // [1]Sheet!A1 points into another workbook: "[" can't be in a sheet name, so no sheet matches it
+        const plain = /(\]?)([A-Za-z0-9_.\u00C0-\uFFFF]+)!$/.exec(before);
+        sheet = plain ? (plain[1] ? `[external]${plain[2]}` : plain[2])
+          : offset === 1 && i > 0 && parts[i - 1].startsWith("'") ? unquoteSheet(parts[i - 1]) : undefined;
       }
       const role: RefRole = isEnd ? 'end' : part[offset + m.length] === ':' ? 'start' : 'single';
+      // The end of a range pushed past the sheet's edge stays at the edge, as in Excel (SUM(B1:B1048576))
       const col = (abs: string, letters: string, r: RefRole) => {
-        const c = mapCol(colIndex(letters), !!abs, r, sheet);
+        let c = mapCol(colIndex(letters), !!abs, r, sheet);
+        if (c !== null && c >= MAX_COLUMNS && r === 'end' && colIndex(letters) < MAX_COLUMNS) c = MAX_COLUMNS - 1;
         return c !== null && c >= 0 && c < MAX_COLUMNS ? abs + colLetter(c) : null;
       };
       const row = (abs: string, digits: string, r: RefRole) => {
-        const n = mapRow(parseInt(digits, 10), !!abs, r, sheet);
+        let n = mapRow(parseInt(digits, 10), !!abs, r, sheet);
+        if (n !== null && n > MAX_ROWS && r === 'end' && parseInt(digits, 10) <= MAX_ROWS) n = MAX_ROWS;
         return n !== null && n >= 1 && n <= MAX_ROWS ? n : null;
       };
       prevEnd = offset + m.length;
@@ -272,7 +291,7 @@ export function dateToSerial(d: Date): number {
 export function encodeXString(s: string): string {
   return s
     .replace(/_(?=x[0-9A-Fa-f]{4}_)/g, '_x005F_')
-    .replace(/[\x00-\x08\x0B\x0C\r\x0E-\x1F]/g, c => `_x${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}_`);
+    .replace(/[\x00-\x08\x0B\x0C\r\x0E-\x1F\uFFFE\uFFFF]/g, c => `_x${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}_`);
 }
 
 // The format SheetWriter gives a date without one: the time only when there is one
@@ -324,16 +343,19 @@ export async function recalcOnOpen(
 
 // Excel refuses to open a workbook that breaks these rules
 export function validateSheetName(name: string, existing: Iterable<string>): void {
-  if (!name || name.length > 31 || /[\\/?*:[\]]/.test(name) || name.startsWith("'") || name.endsWith("'")) {
-    throw new Error(`Invalid sheet name "${name}": 1-31 characters, none of \\ / ? * : [ ], and no leading or trailing apostrophe.`);
+  if (!name || name.length > 31 || /[\\/?*:[\]\x00-\x1F\uFFFE\uFFFF]/.test(name) || name.startsWith("'") || name.endsWith("'")) {
+    throw new Error(`Invalid sheet name "${name}": 1-31 characters, none of \\ / ? * : [ ] or control characters, and no leading or trailing apostrophe.`);
   }
   for (const other of existing) {
     if (other.toLowerCase() === name.toLowerCase()) throw new Error(`Duplicate sheet name "${name}".`);
   }
 }
 
+// Characters XML 1.0 can't carry at all. Text that allows _xHHHH_ escapes keeps them through
+// encodeXString first; anywhere else (names, properties, formulas) they are dropped.
+export const INVALID_XML_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/g;
 export const escapeXml = (val: string) =>
-  val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  val.replace(INVALID_XML_CHARS, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 export const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Out-of-range references (&#x110000;) stay as written instead of throwing
 const fromCodePoint = (cp: number, m: string) => (cp <= 0x10ffff ? String.fromCodePoint(cp) : m);

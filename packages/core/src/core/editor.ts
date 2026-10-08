@@ -4,7 +4,7 @@ import { Row, SheetOptions, CellValue, CellStyle } from './types';
 import { ZipStreamWriter } from './zip-stream-writer';
 import { StylePatcher } from './style-patcher';
 import {
-  AxisMap, createShiftTransform, mapComments, mapVml, mapDrawing, mapTable, mapChart, mapPivotCache, mapDefinedNames,
+  AxisMap, createShiftTransform, mapComments, mapVml, mapDrawing, mapTable, mapChart, mapPivotCache, mapPivotTable, mapDefinedNames,
   type ShiftOp, type ShiftMaps,
 } from './sheet-shift';
 import {
@@ -44,7 +44,7 @@ function editedCell(p: string, ref: string, attrs: string, edit: CellValue | { f
   return `<${p}c r="${ref}"${attrs} t="inlineStr"><${p}is>${t}</${p}is></${p}c>`;
 }
 
-// The cells of a new sheet, as edits of an empty one
+// The cells of new rows (a new sheet, or rows appended to one) as edits, rows numbered from 1
 function rowsToEdits(name: string, rows: Row[]): EditedRows {
   const edits: EditedRows = new Map();
   rows.forEach((row, ri) => {
@@ -56,7 +56,7 @@ function rowsToEdits(name: string, rows: Row[]): EditedRows {
         return;
       }
       if (cell.hyperlink !== undefined || cell.comment !== undefined) {
-        throw new Error(`Sheet "${name}": SheetEditor.addSheet does not write hyperlinks or notes; use SheetWriter.`);
+        throw new Error(`Sheet "${name}": SheetEditor does not write hyperlinks or notes in new rows; use SheetWriter.`);
       }
       // Rich text is written as plain text here
       const value = cell.richText && cell.value == null ? cell.richText.map(r => r.text).join('') : cell.value;
@@ -75,15 +75,19 @@ const asMatch = (el: { whole: string; attrs: string; body: string }) =>
   [el.whole, el.attrs, el.whole.endsWith('/>') ? undefined : el.body] as unknown as RegExpMatchArray;
 
 export class SheetEditor {
-  private modifications = new Map<string, { rows: Row[], options: SheetOptions }>();
+  private appends = new Map<string, Row[][]>();
   private cellEdits = new Map<string, EditedRows>();
   private additions = new Map<string, Row[]>();
   private deletions = new Set<string>();
   private shiftOps = new Map<string, { rows: ShiftOp[]; cols: ShiftOp[] }>();
 
-  // Appends `rows` after the last existing row of sheet `sheetName`.
-  appendSheet(sheetName: string, rows: Row[], options: SheetOptions = {}) {
-    this.modifications.set(sheetName, { rows, options });
+  // Appends `rows` after the last existing row of sheet `sheetName`. Cells take values, formulas and
+  // styles, as in addSheet. Called again for the same sheet, the rows go after the earlier ones.
+  appendSheet(sheetName: string, rows: Row[], _options: SheetOptions = {}): this {
+    let batches = this.appends.get(sheetName);
+    if (!batches) this.appends.set(sheetName, batches = []);
+    batches.push(rows);
+    return this;
   }
 
   // Sets cells of an existing sheet by address, e.g. { B2: 42, C2: { formula: 'B2*2' } }. A cell
@@ -186,8 +190,8 @@ export class SheetEditor {
           return path;
         };
 
-        const appendByPath = new Map<string, Row[]>();
-        for (const [sheetName, mod] of this.modifications) appendByPath.set(pathOf(sheetName), mod.rows);
+        const appendByPath = new Map<string, EditedRows>();
+        for (const [sheetName, batches] of this.appends) appendByPath.set(pathOf(sheetName), rowsToEdits(sheetName, batches.flat()));
         const editsByPath = new Map<string, EditedRows>();
         for (const [sheetName, rows] of this.cellEdits) editsByPath.set(pathOf(sheetName), rows);
 
@@ -245,6 +249,7 @@ export class SheetEditor {
               if (type === '/comments' || type === '/threadedComment') await update(rel.path, xml => mapComments(xml, map));
               if (type === '/vmlDrawing') await update(rel.path, xml => mapVml(xml, map));
               if (type === '/drawing') await update(rel.path, xml => mapDrawing(xml, map));
+              if (type === '/pivotTable') await update(rel.path, xml => mapPivotTable(xml, map));
             }
           }
           // Charts on any sheet can plot the moved rows, and so can pivot tables
@@ -262,7 +267,7 @@ export class SheetEditor {
         }
 
         // Edited cells invalidate cached formula results
-        if (editsByPath.size || added.size || this.deletions.size || rowMaps.size) {
+        if (editsByPath.size || added.size || appendByPath.size || this.deletions.size || rowMaps.size) {
           const { replace, drop } = await recalcOnOpen(read, parts, await read(parts.workbookPath));
           for (const [path, xml] of replace) overlay.set(path, xml);
           for (const path of drop) written.add(path);
@@ -270,10 +275,10 @@ export class SheetEditor {
 
         // Styles gain the formats of restyled cells as the sheets stream, so they are written last
         let patcher: StylePatcher | undefined;
-        const styled = [...editsByPath.values(), ...added.values()]
+        const styled = [...editsByPath.values(), ...added.values(), ...appendByPath.values()]
           .some(rows => [...rows.values()].some(cells => [...cells.values()].some(e => styleOf(e))));
         // Dates may need a date format added to their cells
-        const dated = [...editsByPath.values(), ...added.values()]
+        const dated = [...editsByPath.values(), ...added.values(), ...appendByPath.values()]
           .some(rows => [...rows.values()].some(cells => [...cells.values()].some(e => contentOf(e) instanceof Date)));
         if (styled || (dated && parts.styles)) {
           if (!parts.styles) throw new Error('Workbook has no styles part.');
@@ -300,15 +305,14 @@ export class SheetEditor {
 
         for (const filename of zipIn.getFiles()) {
           if (written.has(filename)) continue;
-          const rows = appendByPath.get(filename);
+          const append = appendByPath.get(filename);
           const edits = editsByPath.get(filename);
           const shift = shiftByPath.get(filename);
-          if (rows || edits || shift !== undefined) {
+          if (append || edits || shift !== undefined) {
             checkSize(filename, options?.maxUncompressedBytes ?? Infinity);
             let text = decode(await zipIn.extractStream(filename));
             if (shift !== undefined) text = text.pipeThrough(createShiftTransform(shift, rowMaps));
-            if (edits) text = text.pipeThrough(this.createEditTransform(edits, patcher));
-            if (rows) text = text.pipeThrough(this.createInjectTransform(rows));
+            if (edits || append) text = text.pipeThrough(this.createEditTransform(edits ?? new Map(), patcher, append));
             await zipOut.addFile(filename, encode(text));
           } else {
             // Untouched entries are copied without decompressing
@@ -328,10 +332,12 @@ export class SheetEditor {
   }
 
   // Streams a worksheet, rewriting edited cells as their rows pass by and adding rows and cells
-  // that did not exist. Only one row at a time is held in memory.
-  private createEditTransform(edits: EditedRows, patcher?: StylePatcher): TransformStream<string, string> {
+  // that did not exist. `append` rows (numbered from 1) go after the last row. Only one row at a
+  // time is held in memory.
+  private createEditTransform(edits: EditedRows, patcher?: StylePatcher, append?: EditedRows): TransformStream<string, string> {
     const pending = [...edits.keys()].sort((a, b) => a - b);
     let next = 0;
+    let lastRow = 0;         // number of the last row read, for rows without an r attribute
     let buffer = '';
     let p = '';              // namespace prefix of the sheet's elements
     let state: 'head' | 'rows' | 'tail' = 'head';
@@ -360,14 +366,24 @@ export class SheetEditor {
       return editedCell(p, ref, attrs.replace(/\s(?:t|vm|cm)="[^"]*"/g, ''), content);
     };
 
-    const newRow = (r: number) => {
-      const cells = [...edits.get(r)!.entries()].sort((a, b) => a[0] - b[0])
+    const newRow = (r: number, rowEdits = edits.get(r)!) => {
+      const cells = [...rowEdits.entries()].sort((a, b) => a[0] - b[0])
         .map(([c, e]) => cellXml(colLetter(c) + r, e)).join('');
       return `<${p}row r="${r}">${cells}</${p}row>`;
     };
     const rowsBefore = (limit: number) => {
       let xml = '';
       for (; next < pending.length && pending[next] < limit; next++) xml += newRow(pending[next]);
+      return xml;
+    };
+    // The rows still to come at the end of sheetData: new edited rows, then the appended rows
+    const lastRows = () => {
+      let xml = rowsBefore(Infinity);
+      if (!append?.size) return xml;
+      const base = Math.max(lastRow, pending[pending.length - 1] ?? 0);
+      const last = base + Math.max(...append.keys());
+      if (last > MAX_ROWS) throw new Error(`Appending rows would reach row ${last}, past Excel's last row (${MAX_ROWS}).`);
+      for (const [r, cells] of [...append].sort((a, b) => a[0] - b[0])) xml += newRow(base + r, cells);
       return xml;
     };
 
@@ -423,7 +439,7 @@ export class SheetEditor {
             p = m[1];
             if (m[2]) {
               // Empty sheet: <sheetData/> becomes a pair holding the new rows
-              out += buffer.slice(0, m.index) + `<${p}sheetData>${rowsBefore(Infinity)}</${p}sheetData>`;
+              out += buffer.slice(0, m.index) + `<${p}sheetData>${lastRows()}</${p}sheetData>`;
               buffer = buffer.slice(m.index + m[0].length);
               state = 'tail';
             } else {
@@ -443,10 +459,13 @@ export class SheetEditor {
             const m = new RegExp(`^\\s*(?:<${p}row\\b([^>]*?)(?:/>|>([\\s\\S]*?)</${p}row>)|</${p}sheetData>)`).exec(buffer);
             if (!m) break;
             if (m[0].trimStart().startsWith(`</${p}sheetData`)) {
-              out += rowsBefore(Infinity) + m[0];
+              out += lastRows() + m[0];
               state = 'tail';
             } else {
-              const r = parseInt(/\sr="(\d+)"/.exec(m[1])?.[1] ?? '0', 10);
+              // A row without r is the one after the previous row, as the reader counts it
+              const rAttr = /\sr="(\d+)"/.exec(m[1])?.[1];
+              const r = rAttr ? parseInt(rAttr, 10) : lastRow + 1;
+              lastRow = Math.max(lastRow, r);
               out += rowsBefore(r);
               const open = m[0].slice(0, m[0].indexOf('>') + 1);
               // Rows are only parsed when they have edits or take part in a shared formula
@@ -468,67 +487,6 @@ export class SheetEditor {
         }
         if (buffer) controller.enqueue(buffer);
       },
-    });
-  }
-
-  private createInjectTransform(rows: Row[]): TransformStream<string, string> {
-    let buffer = '';
-    let maxRow = 0;
-    let done = false;
-    const rowsXml = (): string => rows.map((row, ri) => {
-      const rowNum = maxRow + ri + 1;
-      const cellsXml = row.map((cell, ci) => {
-        const colRef = colLetter(ci) + rowNum;
-        const val = typeof cell === 'object' && cell !== null && 'value' in cell ? cell.value : cell;
-        if (val === null || val === undefined) return `<c r="${colRef}"/>`;
-        if (typeof val === 'boolean') return `<c r="${colRef}" t="b"><v>${val ? 1 : 0}</v></c>`;
-        if (typeof val === 'number') return `<c r="${colRef}"><v>${val}</v></c>`;
-        if (typeof val === 'string') {
-          return `<c r="${colRef}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(encodeXString(checkCellText(val, colRef)))}</t></is></c>`;
-        }
-        return `<c r="${colRef}"/>`;
-      }).join('');
-      return `<row r="${rowNum}">${cellsXml}</row>`;
-    }).join('');
-
-    return new TransformStream({
-      transform(chunk, controller) {
-        if (done) { controller.enqueue(chunk); return; }
-        buffer += chunk;
-
-        for (const m of buffer.matchAll(/<(?:\w+:)?row\b[^>]*?\sr="(\d+)"/g)) {
-          const r = parseInt(m[1], 10);
-          if (r > maxRow) maxRow = r;
-        }
-
-        const close = /<\/(?:\w+:)?sheetData>|<((?:\w+:)?sheetData)\b[^>]*\/>/.exec(buffer);
-        if (close) {
-          const before = buffer.slice(0, close.index);
-          const after = buffer.slice(close.index + close[0].length);
-          // Self-closing <sheetData/> (empty sheet) becomes an open/close pair
-          const tagName = close[1];
-          const inject = tagName
-            ? `${close[0].slice(0, -2)}>${rowsXml()}</${tagName}>`
-            : `${rowsXml()}${close[0]}`;
-          controller.enqueue(before + inject + after);
-          buffer = '';
-          done = true;
-        } else {
-          // Hold back from the last '<' so a split tag is never emitted half-scanned
-          const cut = buffer.lastIndexOf('<');
-          if (cut > 0) {
-            controller.enqueue(buffer.slice(0, cut));
-            buffer = buffer.slice(cut);
-          }
-        }
-      },
-      flush(controller) {
-        if (!done) {
-          controller.error(new Error('Worksheet has no <sheetData> element.'));
-          return;
-        }
-        if (buffer.length > 0) controller.enqueue(buffer);
-      }
     });
   }
 

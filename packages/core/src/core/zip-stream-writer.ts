@@ -9,12 +9,19 @@ const CRC_TABLE = (() => {
 })();
 
 export function crc32(bytes: Uint8Array): number {
-  let crc = 0xffffffff;
+  return (crc32Update(0xffffffff, bytes) ^ 0xffffffff) >>> 0;
+}
+
+// Running CRC-32 over chunks: start at 0xffffffff, finish with (crc ^ 0xffffffff) >>> 0
+export function crc32Update(crc: number, bytes: Uint8Array): number {
   for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
+  return crc;
 }
 
 const MAX_U32 = 0xffffffff;
+
+// General-purpose flag bit 11: the entry name is UTF-8 (set only when it isn't plain ASCII)
+const utf8Flag = (name: Uint8Array) => name.some(b => b > 0x7f) ? 0x0800 : 0;
 
 // No ZIP64 support: fail loudly instead of writing a corrupt archive.
 function assertNoZip64(value: number, what: string) {
@@ -36,7 +43,7 @@ export class ZipStreamWriter {
   private cdEntries: CdEntry[] = [];
   private offset = 0;
   private streamController!: ReadableStreamDefaultController<Uint8Array>;
-  private resumePull: (() => void) | null = null;
+  private waiting: (() => void)[] = [];
   private cancelled = false;
   public stream: ReadableStream<Uint8Array>;
   private textEncoder = new TextEncoder();
@@ -46,15 +53,11 @@ export class ZipStreamWriter {
       start: (controller) => {
         this.streamController = controller;
       },
-      pull: () => {
-        this.resumePull?.();
-        this.resumePull = null;
-      },
+      pull: () => this.wake(),
       // Consumer gone: unblock any pending write so the producer can see the error.
       cancel: () => {
         this.cancelled = true;
-        this.resumePull?.();
-        this.resumePull = null;
+        this.wake();
       }
     }, new ByteLengthQueuingStrategy({ highWaterMark: highWaterMarkBytes }));
   }
@@ -62,19 +65,21 @@ export class ZipStreamWriter {
   // Adds a file to the zip. `inputStream` MUST be raw uncompressed data.
   async addFile(filenameStr: string, inputStream: ReadableStream<Uint8Array>): Promise<void> {
     const filename = this.textEncoder.encode(filenameStr);
+    const flags = 0x0008 | utf8Flag(filename);
     const startOffset = this.offset;
-    await this.pushChunk(this.localHeader(filename, 0x0008, 8, 0, 0, 0));
+    await this.pushChunk(this.localHeader(filename, flags, 8, 0, 0, 0));
 
     // Stream data, tracking sizes and CRC32
     let uncompressedSize = 0;
     let crc = 0xffffffff;
 
     const crcStream = new TransformStream<Uint8Array, Uint8Array>({
-      transform: (chunk, controller) => {
+      // CompressionStream takes every write at once, so the input is held back here instead,
+      // while nobody reads the output
+      transform: async (chunk, controller) => {
+        await this.roomInQueue();
         uncompressedSize += chunk.length;
-        for (let i = 0; i < chunk.length; i++) {
-          crc = CRC_TABLE[(crc ^ chunk[i]) & 0xff] ^ (crc >>> 8);
-        }
+        crc = crc32Update(crc, chunk);
         controller.enqueue(chunk);
       }
     });
@@ -84,11 +89,17 @@ export class ZipStreamWriter {
       .pipeThrough(crcStream)
       .pipeThrough(new CompressionStream('deflate-raw') as any as TransformStream<Uint8Array, Uint8Array>)
       .getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      compressedSize += value.length;
-      await this.pushChunk(value);
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        compressedSize += value.length;
+        await this.pushChunk(value);
+      }
+    } catch (err) {
+      // Stop the source too (a row generator's finally runs, a database cursor closes)
+      await reader.cancel(err).catch(() => {});
+      throw err;
     }
 
     crc = (crc ^ 0xffffffff) >>> 0;
@@ -104,14 +115,15 @@ export class ZipStreamWriter {
     descView.setUint32(12, uncompressedSize, true);
     await this.pushChunk(desc);
 
-    this.cdEntries.push({ filename, offset: startOffset, uncompressedSize, compressedSize, crc, flags: 0x0008, method: 8 });
+    this.cdEntries.push({ filename, offset: startOffset, uncompressedSize, compressedSize, crc, flags, method: 8 });
   }
 
   // Adds a file that is ALREADY compressed (pass-through for the Editor)
   async addCompressedFile(filenameStr: string, compressedStream: ReadableStream<Uint8Array>, uncompressedSize: number, compressedSize: number, crc: number, method = 8): Promise<void> {
     const filename = this.textEncoder.encode(filenameStr);
+    const flags = utf8Flag(filename);
     const startOffset = this.offset;
-    await this.pushChunk(this.localHeader(filename, 0, method, crc, compressedSize, uncompressedSize));
+    await this.pushChunk(this.localHeader(filename, flags, method, crc, compressedSize, uncompressedSize));
 
     const reader = compressedStream.getReader();
     while (true) {
@@ -120,11 +132,12 @@ export class ZipStreamWriter {
       await this.pushChunk(value);
     }
 
-    this.cdEntries.push({ filename, offset: startOffset, uncompressedSize, compressedSize, crc, flags: 0, method });
+    this.cdEntries.push({ filename, offset: startOffset, uncompressedSize, compressedSize, crc, flags, method });
   }
 
   async close(): Promise<void> {
-    if (this.cdEntries.length > 0xffff) throw new Error('ZIP64 not supported: more than 65535 entries.');
+    // 0xFFFF in the end record means "see the ZIP64 record", which readers then look for
+    if (this.cdEntries.length >= 0xffff) throw new Error('ZIP64 not supported: 65535 entries or more.');
     const cdStartOffset = this.offset;
 
     for (const entry of this.cdEntries) {
@@ -182,11 +195,23 @@ export class ZipStreamWriter {
 
   // Enqueue and wait while the consumer's queue is full, so memory stays bounded.
   private async pushChunk(chunk: Uint8Array) {
+    if (this.cancelled) throw new Error('ZIP stream cancelled by consumer.');
     this.streamController.enqueue(chunk);
     this.offset += chunk.length;
+    await this.roomInQueue();
+  }
+
+  private async roomInQueue() {
     while ((this.streamController.desiredSize ?? 1) <= 0) {
       if (this.cancelled) throw new Error('ZIP stream cancelled by consumer.');
-      await new Promise<void>(resolve => { this.resumePull = resolve; });
+      await new Promise<void>(resolve => this.waiting.push(resolve));
     }
+    if (this.cancelled) throw new Error('ZIP stream cancelled by consumer.');
+  }
+
+  private wake() {
+    const waiting = this.waiting;
+    this.waiting = [];
+    for (const resolve of waiting) resolve();
   }
 }

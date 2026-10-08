@@ -94,7 +94,9 @@ export async function readOdsWorkbook(content: TokenSource, readText: (name: str
   }
   if (!properties.creator && text('dc:creator')) properties.creator = text('dc:creator');
   const created = text('meta:creation-date');
-  if (created && !isNaN(Date.parse(created))) properties.created = new Date(created);
+  // Without a zone the time is UTC, as written by OdsWriter (and stored by Excel)
+  const createdAt = created && new Date(/(?:Z|[+-]\d\d:?\d\d)$/.test(created) ? created : created + 'Z');
+  if (createdAt && !isNaN(createdAt.getTime())) properties.created = createdAt;
   return { sheets, definedNames, properties };
 }
 

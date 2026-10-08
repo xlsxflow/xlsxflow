@@ -1,19 +1,28 @@
 import { Row, StyledCell, CellValue, SheetOptions, SheetImage, CellComment, TableOptions, PageSetup, RichTextRun, WorkbookProperties, DefinedName } from './types';
 import { StyleEngine, fontXml } from './style-engine';
 import { ConditionalFormatter } from './conditional-formatter';
-import { FormulaEngine } from './formula-engine';
+import { FormulaEngine, FormulaError } from './formula-engine';
 import { ZipStreamWriter } from './zip-stream-writer';
-import { encodeXString, colLetter, colIndex, dateToSerial, validateSheetName, defaultDateFormat, checkCellText, argb, MAX_COLUMNS, MAX_ROWS } from './utils';
+import { encodeXString, colLetter, colIndex, dateToSerial, validateSheetName, defaultDateFormat, checkCellText, argb, escapeXml as escapeText, MAX_COLUMNS, MAX_ROWS } from './utils';
 import { imageInfo, drawingXml, type ImageInfo } from './image';
 
-function escapeXml(val: unknown): string {
-  return String(val)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+const escapeXml = (val: unknown): string => escapeText(String(val)).replace(/'/g, '&apos;');
+
+// "A1:B2" (or one cell) -> 0-based corners, checked against Excel's sheet size
+export function parseRange(ref: string, what: string): { c1: number; r1: number; c2: number; r2: number } {
+  const m = /^\$?([A-Za-z]{1,3})\$?(\d+)(?::\$?([A-Za-z]{1,3})\$?(\d+))?$/.exec(String(ref).trim());
+  const box = m && {
+    c1: colIndex(m[1]), r1: parseInt(m[2], 10) - 1,
+    c2: colIndex(m[3] ?? m[1]), r2: parseInt(m[4] ?? m[2], 10) - 1,
+  };
+  if (!box || [box.c1, box.c2].some(c => c >= MAX_COLUMNS) || [box.r1, box.r2].some(r => r < 0 || r >= MAX_ROWS)) {
+    throw new Error(`Invalid ${what} "${ref}".`);
+  }
+  return { c1: Math.min(box.c1, box.c2), r1: Math.min(box.r1, box.r2), c2: Math.max(box.c1, box.c2), r2: Math.max(box.r1, box.r2) };
 }
+
+type Box = ReturnType<typeof parseRange>;
+const overlaps = (a: Box, b: Box) => a.c1 <= b.c2 && b.c1 <= a.c2 && a.r1 <= b.r2 && b.r1 <= a.r2;
 
 function isStyledCell(v: CellValue | StyledCell): v is StyledCell {
   return typeof v === 'object' && v !== null && 'value' in v;
@@ -80,7 +89,7 @@ function appPropsXml(p: WorkbookProperties): string {
 
 // A name Excel accepts: letters, digits, _ . and \, not a cell reference (A1, R1C1) and not reserved
 function validateDefinedName(name: string) {
-  if (!/^[A-Za-z_\\][A-Za-z0-9_.\\]*$/.test(name) || /^[A-Za-z]{1,3}\d+$/.test(name) || /^([Rr]\d*)?([Cc]\d*)?$/.test(name) || /^_xlnm\./i.test(name)) {
+  if (!/^[A-Za-z_\\][A-Za-z0-9_.\\]*$/.test(name) || name.length > 255 || /^[A-Za-z]{1,3}\d+$/.test(name) || /^([Rr]\d*)?([Cc]\d*)?$/.test(name) || /^_xlnm\./i.test(name)) {
     throw new Error(`Invalid defined name "${name}"`);
   }
 }
@@ -154,6 +163,7 @@ export class SheetWriter {
           this.formulaEngine.clear();
           if (Array.isArray(sheet.rows)) {
             this.formulaEngine.loadData(sheet.rows.map(row => row.map(cell => {
+              if (isStyledCell(cell) && cell.formula) return { formula: cell.formula };
               const v = !isStyledCell(cell) ? cell : cell.richText && cell.value == null ? cell.richText.map(r => r.text).join('') : cell.value;
               return v instanceof Date ? dateToSerial(v) : v;
             })));
@@ -161,7 +171,7 @@ export class SheetWriter {
           }
           const parts: SheetParts = { links: [], comments: [] };
           const sheetTables = tables.filter(t => t.sheet === i);
-          await zip.addFile(`xl/worksheets/sheet${i + 1}.xml`, this.buildWorksheetXmlStream(sheet.rows, sheet.options, parts, sheetTables.length));
+          await zip.addFile(`xl/worksheets/sheet${i + 1}.xml`, this.buildWorksheetXmlStream(sheet.rows, sheet.options, parts, sheetTables.length, Array.isArray(sheet.rows)));
           const images = sheet.options.images ?? [];
           const drawing = images.length ? ++drawings : 0;
           const rels = this.buildSheetRels(parts.links, drawing, parts.comments.length ? i + 1 : 0, sheetTables.map(t => t.id));
@@ -199,13 +209,18 @@ export class SheetWriter {
     const plan: { sheet: number; id: number; table: TableOptions; columns: string[] }[] = [];
     const names = new Set<string>();
     this.sheets.forEach((sheet, i) => {
+      const boxes: Box[] = [];
       for (const table of sheet.options.tables ?? []) {
-        if (!/^[A-Za-z_\\][A-Za-z0-9_.]*$/.test(table.name) || names.has(table.name.toLowerCase())) {
-          throw new Error(`Invalid or duplicate table name "${table.name}".`);
-        }
+        // Table names follow the defined-name rules: no "AB12", "R1C1" or "C"
+        let valid = !names.has(String(table.name).toLowerCase());
+        try { validateDefinedName(table.name); } catch { valid = false; }
+        if (!valid) throw new Error(`Invalid or duplicate table name "${table.name}".`);
         names.add(table.name.toLowerCase());
         const m = /^([A-Za-z]{1,3})(\d+):([A-Za-z]{1,3})(\d+)$/.exec(table.ref.replace(/\$/g, ''));
         if (!m) throw new Error(`Invalid table range "${table.ref}".`);
+        const box = parseRange(table.ref, 'table range');
+        if (boxes.some(b => overlaps(b, box))) throw new Error(`Table "${table.name}" overlaps another table on sheet "${sheet.name}".`);
+        boxes.push(box);
         const first = colIndex(m[1]);
         const width = colIndex(m[3]) - first + 1;
         let columns = table.columns;
@@ -272,9 +287,9 @@ export class SheetWriter {
   }
 
   // Pull-based so rows are only generated as fast as the ZIP consumer drains them.
-  private buildWorksheetXmlStream(rows: Row[] | AsyncIterable<Row>, options: SheetOptions, parts: SheetParts, tables: number): ReadableStream<Uint8Array> {
+  private buildWorksheetXmlStream(rows: Row[] | AsyncIterable<Row>, options: SheetOptions, parts: SheetParts, tables: number, evaluate: boolean): ReadableStream<Uint8Array> {
     const encoder = new TextEncoder();
-    const chunks = this.worksheetXmlChunks(rows, options, parts, tables);
+    const chunks = this.worksheetXmlChunks(rows, options, parts, tables, evaluate);
     return new ReadableStream({
       async pull(controller) {
         const { done, value } = await chunks.next();
@@ -288,7 +303,8 @@ export class SheetWriter {
   }
 
   // Hyperlink targets and comments are collected in `parts` for the parts written after the sheet
-  private async *worksheetXmlChunks(rows: Row[] | AsyncIterable<Row>, options: SheetOptions, parts: SheetParts, tables: number): AsyncGenerator<string> {
+  // `evaluate`: the rows are an array loaded into the formula engine, so formulas get cached results
+  private async *worksheetXmlChunks(rows: Row[] | AsyncIterable<Row>, options: SheetOptions, parts: SheetParts, tables: number, evaluate: boolean): AsyncGenerator<string> {
     const links = parts.links;
     const hyperlinks: string[] = [];
     const colCount = Math.max(options.columnWidths?.length ?? 0, options.columns?.length ?? 0);
@@ -300,7 +316,11 @@ export class SheetWriter {
       colWidths += `<col min="${i + 1}" max="${i + 1}"${width !== undefined ? ` width="${escapeXml(width)}" customWidth="1"` : ''}` +
         `${c.hidden ? ' hidden="1"' : ''}${c.outlineLevel ? ` outlineLevel="${escapeXml(c.outlineLevel)}"` : ''}/>`;
     }
-    const rowOptions = Object.entries(options.rows ?? {}).map(([r, o]) => [parseInt(r, 10), o] as const).sort((a, b) => a[0] - b[0]);
+    const rowOptions = Object.entries(options.rows ?? {}).map(([r, o]) => {
+      const n = Number(r);
+      if (!Number.isInteger(n) || n < 1 || n > MAX_ROWS) throw new Error(`Row options for "${r}": rows are numbered 1 to ${MAX_ROWS}.`);
+      return [n, o] as const;
+    }).sort((a, b) => a[0] - b[0]);
     const rowAttrs = new Map(rowOptions.map(([r, o]) =>
       [r, `${o.height !== undefined ? ` ht="${escapeXml(o.height)}" customHeight="1"` : ''}${o.hidden ? ' hidden="1"' : ''}${o.outlineLevel ? ` outlineLevel="${escapeXml(o.outlineLevel)}"` : ''}`]));
     let nextRowOption = 0;
@@ -352,90 +372,94 @@ export class SheetWriter {
       : (async function*() { for (const r of rows as Row[]) yield r; })();
 
     let chunkStr = '';
-    while (true) {
-      const { done, value: row } = await iterator.next();
-      if (done) break;
+    // Ends the caller's row source when the output is cancelled or fails (its finally blocks run)
+    try {
+      while (true) {
+        const { done, value: row } = await iterator.next();
+        if (done) break;
 
-      const rowNum = ri + 1;
-      // Past Excel's sheet size the file is damaged, so refuse it instead
-      if (rowNum > MAX_ROWS) throw new Error(`Row ${rowNum} is past Excel's last row (${MAX_ROWS}).`);
-      if (row.length > MAX_COLUMNS) throw new Error(`Row ${rowNum} has ${row.length} cells, more than Excel's ${MAX_COLUMNS} columns.`);
-      chunkStr += optionRowsBefore(rowNum);
-      if (rowOptions[nextRowOption]?.[0] === rowNum) nextRowOption++;
-      const cellsXml = row.map((cell, ci) => {
-        const colRef = colLetter(ci) + rowNum;
-        const styledCell: StyledCell = isStyledCell(cell) ? cell : { value: cell };
-        const val = styledCell.value;
-        let cellStyle = styledCell.style;
-        if (val instanceof Date && !cellStyle?.numFmt) {
-          // A date needs a date format, or Excel shows the bare serial number
-          cellStyle = { ...cellStyle, numFmt: defaultDateFormat(val) };
-        }
-        const style = cellStyle ? this.styleEngine.registerStyle(cellStyle) : 0;
-        const sAttr = style > 0 ? ` s="${style}"` : '';
-
-        if (styledCell.comment !== undefined) {
-          const comment = typeof styledCell.comment === 'string' ? { text: styledCell.comment } : styledCell.comment;
-          parts.comments.push({ ref: colRef, row: rowNum - 1, col: ci, comment });
-        }
-
-        if (styledCell.hyperlink) {
-          if (styledCell.hyperlink.startsWith('#')) {
-            hyperlinks.push(`<hyperlink ref="${colRef}" location="${escapeXml(styledCell.hyperlink.slice(1))}"/>`);
-          } else {
-            links.push(styledCell.hyperlink);
-            hyperlinks.push(`<hyperlink ref="${colRef}" r:id="rId${links.length}"/>`);
+        const rowNum = ri + 1;
+        // Past Excel's sheet size the file is damaged, so refuse it instead
+        if (rowNum > MAX_ROWS) throw new Error(`Row ${rowNum} is past Excel's last row (${MAX_ROWS}).`);
+        if (row.length > MAX_COLUMNS) throw new Error(`Row ${rowNum} has ${row.length} cells, more than Excel's ${MAX_COLUMNS} columns.`);
+        chunkStr += optionRowsBefore(rowNum);
+        if (rowOptions[nextRowOption]?.[0] === rowNum) nextRowOption++;
+        const cellsXml = row.map((cell, ci) => {
+          const colRef = colLetter(ci) + rowNum;
+          const styledCell: StyledCell = isStyledCell(cell) ? cell : { value: cell };
+          const val = styledCell.value;
+          let cellStyle = styledCell.style;
+          if (val instanceof Date && !cellStyle?.numFmt) {
+            // A date needs a date format, or Excel shows the bare serial number
+            cellStyle = { ...cellStyle, numFmt: defaultDateFormat(val) };
           }
-        }
+          const style = cellStyle ? this.styleEngine.registerStyle(cellStyle) : 0;
+          const sAttr = style > 0 ? ` s="${style}"` : '';
 
-        if (styledCell.formula) {
-          const result = this.formulaEngine.evaluate(styledCell.formula);
-          let tAttr = '';
-          let cachedVal = '';
-          if (typeof result === 'number' && isFinite(result)) cachedVal = `<v>${result}</v>`;
-          else if (typeof result === 'boolean') { tAttr = ' t="b"'; cachedVal = `<v>${result ? 1 : 0}</v>`; }
-          else if (typeof result === 'string') {
-            tAttr = result.startsWith('#') ? ' t="e"' : ' t="str"';
-            cachedVal = `<v>${escapeXml(encodeXString(result))}</v>`;
+          if (styledCell.comment !== undefined) {
+            const comment = typeof styledCell.comment === 'string' ? { text: styledCell.comment } : styledCell.comment;
+            parts.comments.push({ ref: colRef, row: rowNum - 1, col: ci, comment });
           }
-          return `<c r="${colRef}"${tAttr}${sAttr}><f>${escapeXml(styledCell.formula.replace(/^=/, ''))}</f>${cachedVal}</c>`;
-        }
 
-        if (styledCell.richText) {
-          // Rich text is always inline, even with sharedStrings on
-          return `<c r="${colRef}" t="inlineStr"${sAttr}><is>${runsXml(styledCell.richText)}</is></c>`;
-        }
-        if (val === null || val === undefined) return `<c r="${colRef}"${sAttr}/>`;
-        if (typeof val === 'boolean') return `<c r="${colRef}" t="b"${sAttr}><v>${val ? 1 : 0}</v></c>`;
-        if (typeof val === 'number') {
-          // NaN/Infinity have no representation in a cell
-          return isFinite(val) ? `<c r="${colRef}"${sAttr}><v>${val}</v></c>` : `<c r="${colRef}" t="e"${sAttr}><v>#NUM!</v></c>`;
-        }
-        if (val instanceof Date) {
-          if (isNaN(val.getTime())) throw new Error(`Invalid Date in cell ${colRef}`);
-          return `<c r="${colRef}"${sAttr}><v>${dateToSerial(val)}</v></c>`;
-        }
-        if (typeof val === 'string') {
-          checkCellText(val, colRef);
-          if (this.writerOptions.sharedStrings) {
-            let index = this.sharedStrings.get(val);
-            if (index === undefined) this.sharedStrings.set(val, index = this.sharedStrings.size);
-            this.sharedStringRefs++;
-            return `<c r="${colRef}" t="s"${sAttr}><v>${index}</v></c>`;
+          if (styledCell.hyperlink) {
+            if (styledCell.hyperlink.startsWith('#')) {
+              hyperlinks.push(`<hyperlink ref="${colRef}" location="${escapeXml(styledCell.hyperlink.slice(1))}"/>`);
+            } else {
+              links.push(styledCell.hyperlink);
+              hyperlinks.push(`<hyperlink ref="${colRef}" r:id="rId${links.length}"/>`);
+            }
           }
-          return `<c r="${colRef}" t="inlineStr"${sAttr}><is>${stringXml(val)}</is></c>`;
-        }
-        return `<c r="${colRef}"${sAttr}/>`;
-      }).join('');
+
+          if (styledCell.formula) {
+            // Streamed rows aren't in the engine, so their formulas get no (made-up) cached value
+            const result = evaluate ? this.formulaEngine.cellValue(colRef) : null;
+            let tAttr = '';
+            let cachedVal = '';
+            if (typeof result === 'number' && isFinite(result)) cachedVal = `<v>${result}</v>`;
+            else if (typeof result === 'boolean') { tAttr = ' t="b"'; cachedVal = `<v>${result ? 1 : 0}</v>`; }
+            else if (result instanceof FormulaError) { tAttr = ' t="e"'; cachedVal = `<v>${escapeXml(result.code)}</v>`; }
+            else if (typeof result === 'string') { tAttr = ' t="str"'; cachedVal = `<v>${escapeXml(encodeXString(result))}</v>`; }
+            return `<c r="${colRef}"${tAttr}${sAttr}><f>${escapeXml(styledCell.formula.replace(/^=/, ''))}</f>${cachedVal}</c>`;
+          }
+
+          if (styledCell.richText) {
+            // Rich text is always inline, even with sharedStrings on
+            return `<c r="${colRef}" t="inlineStr"${sAttr}><is>${runsXml(styledCell.richText)}</is></c>`;
+          }
+          if (val === null || val === undefined) return `<c r="${colRef}"${sAttr}/>`;
+          if (typeof val === 'boolean') return `<c r="${colRef}" t="b"${sAttr}><v>${val ? 1 : 0}</v></c>`;
+          if (typeof val === 'number') {
+            // NaN/Infinity have no representation in a cell
+            return isFinite(val) ? `<c r="${colRef}"${sAttr}><v>${val}</v></c>` : `<c r="${colRef}" t="e"${sAttr}><v>#NUM!</v></c>`;
+          }
+          if (val instanceof Date) {
+            if (isNaN(val.getTime())) throw new Error(`Invalid Date in cell ${colRef}`);
+            return `<c r="${colRef}"${sAttr}><v>${dateToSerial(val)}</v></c>`;
+          }
+          if (typeof val === 'string') {
+            checkCellText(val, colRef);
+            if (this.writerOptions.sharedStrings) {
+              let index = this.sharedStrings.get(val);
+              if (index === undefined) this.sharedStrings.set(val, index = this.sharedStrings.size);
+              this.sharedStringRefs++;
+              return `<c r="${colRef}" t="s"${sAttr}><v>${index}</v></c>`;
+            }
+            return `<c r="${colRef}" t="inlineStr"${sAttr}><is>${stringXml(val)}</is></c>`;
+          }
+          return `<c r="${colRef}"${sAttr}/>`;
+        }).join('');
       
-      chunkStr += `    <row r="${rowNum}"${rowAttrs.get(rowNum) ?? ''}>${cellsXml}</row>\n`;
-      ri++;
+        chunkStr += `    <row r="${rowNum}"${rowAttrs.get(rowNum) ?? ''}>${cellsXml}</row>\n`;
+        ri++;
 
-      // Flush every ~64KB of string data to keep O(1) memory while avoiding chunk overhead
-      if (chunkStr.length > 65536) {
-        yield chunkStr;
-        chunkStr = '';
+        // Flush every ~64KB of string data to keep O(1) memory while avoiding chunk overhead
+        if (chunkStr.length > 65536) {
+          yield chunkStr;
+          chunkStr = '';
+        }
       }
+    } finally {
+      await iterator.return?.();
     }
     
     chunkStr += optionRowsBefore(Infinity);
@@ -455,6 +479,13 @@ export class SheetWriter {
     if (options.autoFilter) footer += `  <autoFilter ref="${escapeXml(options.autoFilter)}"/>\n`;
 
     if (options.mergeCells && options.mergeCells.length > 0) {
+      // Overlapping or malformed merges make Excel repair the file
+      const boxes: Box[] = [];
+      for (const ref of options.mergeCells) {
+        const box = parseRange(ref, 'merge range');
+        if (boxes.some(b => overlaps(b, box))) throw new Error(`Merge "${ref}" overlaps another merge.`);
+        boxes.push(box);
+      }
       const merges = options.mergeCells.map(ref => `<mergeCell ref="${escapeXml(ref)}"/>`).join('');
       footer += `  <mergeCells count="${options.mergeCells.length}">${merges}</mergeCells>\n`;
     }
@@ -476,9 +507,14 @@ export class SheetWriter {
         for (const k of ['errorTitle', 'error', 'promptTitle', 'prompt'] as const) {
           if (dv[k]) attr += ` ${k}="${escapeXml(dv[k]!)}"`;
         }
+        // The file stores formulas without "="; a typed list ("a,b,c") holds at most 255 characters
+        const f1 = dv.formula1?.replace(/^=/, ''), f2 = dv.formula2?.replace(/^=/, '');
+        if (dv.type === 'list' && f1?.startsWith('"') && f1.length - 2 > 255) {
+          throw new Error(`List validation for ${dv.sqref} has ${f1.length - 2} characters; Excel allows 255. Put the items in cells and refer to the range.`);
+        }
         let inner = '';
-        if (dv.formula1) inner += `<formula1>${escapeXml(dv.formula1)}</formula1>`;
-        if (dv.formula2) inner += `<formula2>${escapeXml(dv.formula2)}</formula2>`;
+        if (f1) inner += `<formula1>${escapeXml(f1)}</formula1>`;
+        if (f2) inner += `<formula2>${escapeXml(f2)}</formula2>`;
         return `<dataValidation ${attr}>${inner}</dataValidation>`;
       }).join('');
       footer += `  <dataValidations count="${options.dataValidations.length}">${dvs}</dataValidations>\n`;
@@ -535,7 +571,9 @@ export class SheetWriter {
     ).join('') + this.sheets.map((s, i) => {
       const page = s.options.pageSetup;
       let names = '';
-      if (page?.printArea) names += `<definedName name="_xlnm.Print_Area" localSheetId="${i}">${escapeXml(`${quoteSheet(s.name)}!${absoluteRef(page.printArea)}`)}</definedName>`;
+      // Every range of a multi-range print area names its sheet
+      const area = page?.printArea?.split(',').map(r => `${quoteSheet(s.name)}!${absoluteRef(r.trim())}`).join(',');
+      if (area) names += `<definedName name="_xlnm.Print_Area" localSheetId="${i}">${escapeXml(area)}</definedName>`;
       if (page?.printTitleRows) {
         const rows = page.printTitleRows.replace(/\$/g, '').split(':').map(r => `$${r}`).join(':');
         names += `<definedName name="_xlnm.Print_Titles" localSheetId="${i}">${escapeXml(`${quoteSheet(s.name)}!${rows.includes(':') ? rows : `${rows}:${rows}`}`)}</definedName>`;

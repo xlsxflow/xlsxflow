@@ -29,10 +29,22 @@ export const XlsxFlow = {
     const { SheetReader } = await import('./core/index');
     const reader = new SheetReader();
     const fileReader = await createFileReader(filePath);
-    // All random reads happen inside parse(); the row stream opens its own handle.
+    // Comments, images and .ods content are read after parse() returns, when the handle is closed:
+    // those reads open a short-lived handle of their own
+    let closed = false;
+    const lateRead = async (offset: number, length: number) => {
+      const late = await createFileReader(filePath);
+      try { return await late.read(offset, length); } finally { await late.close(); }
+    };
     try {
-      return await reader.parse(fileReader, options);
+      return await reader.parse({
+        size: fileReader.size,
+        read: (offset, length) => closed ? lateRead(offset, length) : fileReader.read(offset, length),
+        stream: (offset, length) => fileReader.stream(offset, length),
+        close: async () => {},
+      }, options);
     } finally {
+      closed = true;
       await fileReader.close();
     }
   }

@@ -31,7 +31,8 @@ export class CfbReader {
   private readonly byPath = new Map<string, DirEntry & { path: string }>();
 
   constructor(private readonly bytes: Uint8Array) {
-    if (!isCfb(bytes) || bytes.length < 512) throw new Error('Not a compound file (no D0CF11E0 signature)');
+    if (!isCfb(bytes)) throw new Error('Not a compound file (no D0CF11E0 signature)');
+    if (bytes.length < 512) throw corrupt(`only ${bytes.length} bytes, shorter than its 512-byte header`);
     this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const u16 = (o: number) => this.view.getUint16(o, true);
     const u32 = (o: number) => this.view.getUint32(o, true);
