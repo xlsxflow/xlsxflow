@@ -5,7 +5,7 @@ import CopyCommand from "./copy-command";
 
 const CHECKOUT_URL = process.env.NEXT_PUBLIC_CHECKOUT_URL;
 const REPO = "https://github.com/xlsxflow/xlsxflow";
-const CONTACT = "palikaomkar.22.cse@anits.edu.in";
+const CONTACT = "palikaomkar@gmail.com";
 
 const READ = `import { SheetReader, createBlobReader } from '@xlsxflow/core';
 
@@ -31,6 +31,27 @@ const FEATURES: [string, boolean][] = [
   ["Open and save password-protected .xlsx files", false],
 ];
 
+// Kept in step with "Compared with SheetJS and ExcelJS" in the root README
+const COMPARE: [string, string, string, string][] = [
+  ["Streaming .xlsx read and write", "Yes", "No (streams CSV, HTML and JSON out)", "Yes"],
+  ["Cell styles, read and write", "Yes", "No (SheetJS Pro)", "Yes"],
+  ["Images", "Yes", "No", "Yes"],
+  [".xls", "Read", "Read and write", "No"],
+  [".ods", "Read and write", "Read and write", "No"],
+  [".xlsb, .numbers and other formats", "No", "Yes", "No"],
+  ["Charts", "Add (Pro)", "No (SheetJS Pro)", "No"],
+  ["Pivot tables", "Add (Pro)", "No (SheetJS Pro)", "Partial, undocumented"],
+  ["Password-protected files", "Open and save (Pro)", "Old .xls obfuscation only (SheetJS Pro opens AES files)", "No"],
+  ["Licence", "MIT, Pro is paid", "Apache 2.0", "MIT"],
+];
+
+// From the benchmarks in the root README
+const BENCH: [string, string, string, string, string][] = [
+  ["XlsxFlow", "2.9 s", "+2 MB", "2.3 s", "96 MB"],
+  ["ExcelJS 4.4, streaming", "3.4 s", "+9 MB", "2.7 s", "263 MB"],
+  ["SheetJS 0.20.3, compressed", "4.4 s", "+140 MB", "6.1 s", "549 MB"],
+];
+
 const Check = ({ label }: { label: string }) => (
   <svg viewBox="0 0 16 16" className="w-4 h-4 inline-block text-accent" role="img" aria-label={label}>
     <path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -50,6 +71,7 @@ export default function Home() {
           </Link>
           <nav className="flex items-center gap-4 sm:gap-6 text-sm text-muted">
             <a href={`${REPO}#readme`} className="hover:text-ink">Docs</a>
+            <a href="#compare" className="hidden sm:inline hover:text-ink">Compare</a>
             <a href="#pro" className="hover:text-ink">Pro</a>
             <a href="#licence" className="hidden sm:inline hover:text-ink">Licence key</a>
             <a href={REPO} className="hover:text-ink">GitHub</a>
@@ -94,6 +116,78 @@ export default function Home() {
             <p className="lg:col-span-2 text-muted">
               Styles, formulas, merges, frozen panes, images and more are covered in the <a href={`${REPO}#readme`} className={`${link} text-ink`}>documentation</a>.
             </p>
+          </div>
+        </section>
+
+        <section id="compare" className="border-t border-grid scroll-mt-4">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 flex flex-col gap-6">
+            <h2 className="display text-[clamp(40px,5vw,56px)]">Compared with SheetJS and ExcelJS</h2>
+            <p className="text-muted max-w-[68ch]">
+              SheetJS reads and writes far more formats, and ExcelJS has a longer track record. XlsxFlow focuses on .xlsx:
+              streaming in flat memory, keeping everything in a file it edits, and running on Web APIs alone.
+            </p>
+            <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+              <table className="w-full min-w-160 text-[15px] border-t border-grid">
+                <thead>
+                  <tr className="text-left text-sm text-muted">
+                    <th className="py-2 pr-4 font-medium w-[28%]"><span className="sr-only">Feature</span></th>
+                    <th className="py-2 pr-4 font-medium text-ink">XlsxFlow</th>
+                    <th className="py-2 pr-4 font-medium">SheetJS Community Edition</th>
+                    <th className="py-2 font-medium">ExcelJS 4.4</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {COMPARE.map(([what, ours, sheetjs, exceljs]) => (
+                    <tr key={what} className="border-t border-grid align-top">
+                      <th scope="row" className="py-2.5 pr-4 text-left font-normal text-muted">{what}</th>
+                      <td className="py-2.5 pr-4">{ours}</td>
+                      <td className="py-2.5 pr-4">{sheetjs}</td>
+                      <td className="py-2.5">{exceljs}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <h3 className="text-lg font-semibold mt-6">Speed and memory</h3>
+            <div className="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+              <table className="w-full min-w-140 max-w-3xl text-[15px] border-t border-grid">
+                <thead>
+                  <tr className="text-left text-sm text-muted">
+                    <th className="py-2 pr-4 font-medium"><span className="sr-only">Library</span></th>
+                    <th className="py-2 px-3 font-medium text-right">Write 1M cells</th>
+                    <th className="py-2 px-3 font-medium text-right">Heap growth</th>
+                    <th className="py-2 px-3 font-medium text-right">Read 1M cells</th>
+                    <th className="py-2 pl-3 font-medium text-right">Peak memory</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {BENCH.map(([name, ...cells]) => (
+                    <tr key={name} className="border-t border-grid">
+                      <th scope="row" className={`py-2.5 pr-4 text-left ${name === "XlsxFlow" ? "font-semibold" : "font-normal"}`}>{name}</th>
+                      {cells.map((c, i) => <td key={i} className={`py-2.5 text-right ${i === 3 ? "pl-3" : "px-3"}`}>{c}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="text-sm text-muted max-w-[80ch] flex flex-col gap-2">
+              <p>
+                Features were checked against each project&apos;s own documentation on 8 October 2026:{" "}
+                <a href="https://docs.sheetjs.com/docs/miscellany/formats" className={link}>SheetJS formats</a>,{" "}
+                <a href="https://sheetjs.com/pro" className={link}>SheetJS Pro</a> and the{" "}
+                <a href="https://github.com/exceljs/exceljs#readme" className={link}>ExcelJS README</a>. ExcelJS&apos;s last
+                release was in October 2023.
+              </p>
+              <p>
+                Timings are from one laptop on Node 25 and varied by up to 2× between runs, so treat differences under
+                about 20% as a tie. The <a href={`${REPO}#benchmarks`} className={link}>method, more libraries and the
+                scripts</a> are in the README. Spotted something out of date? <a href={`mailto:${CONTACT}`} className={link}>Tell us</a> and
+                we&apos;ll correct it.
+              </p>
+              <p>SheetJS and ExcelJS belong to their respective owners. XlsxFlow isn&apos;t affiliated with or endorsed by either project.</p>
+            </div>
           </div>
         </section>
 
