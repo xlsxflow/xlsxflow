@@ -62,14 +62,17 @@ export default function Home() {
         <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-16 grid gap-x-8 lg:gap-x-12 gap-y-6 md:grid-cols-2 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
           <h1 className="display text-[clamp(48px,6.6vw,84px)] lg:col-start-1 lg:row-start-1 lg:self-end">Read, write and edit xlsx as a stream.</h1>
           <div className="flex flex-col gap-6 md:col-start-2 md:row-start-1 lg:col-start-1 lg:row-start-2">
-            <p className="text-lg text-muted max-w-[38ch]">
+            <p className="text-lg text-muted max-w-[60ch]">
               A JavaScript library with no dependencies. Rows go through one at a time, so memory stays flat whether the
               file has a hundred rows or a million. Runs in Node, Bun, browsers and Cloudflare Workers.
             </p>
-            <CopyCommand command="npm install @xlsxflow/core" />
-            <p className="text-sm text-muted">
-              Also reads .xls and .ods, and writes .ods. Free under the MIT licence.
-            </p>
+            {/* Side by side only while the intro spans the page */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-5 md:flex-col md:items-start md:gap-3">
+              <CopyCommand command="npm install @xlsxflow/core" />
+              <p className="text-sm text-muted">
+                Also reads .xls and .ods, and writes .ods. Free under the MIT licence.
+              </p>
+            </div>
           </div>
           <div className="min-w-0 mt-4 md:col-span-2 lg:mt-0 lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-center">
             <SheetDemo />
@@ -168,7 +171,7 @@ export default function Home() {
             <a href="https://www.npmjs.com/package/@xlsxflow/core" className="hover:text-ink">npm</a>
             <a href="/pro-licence.txt" className="hover:text-ink">Pro licence</a>
             <a href="/privacy" className="hover:text-ink">Privacy</a>
-            <a href={`mailto:${CONTACT}`} className="hover:text-ink">{CONTACT}</a>
+            <a href={`mailto:${CONTACT}`} className="hover:text-ink">Contact</a>
           </nav>
         </div>
       </footer>
