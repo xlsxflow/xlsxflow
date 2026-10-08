@@ -59,6 +59,14 @@ const Check = ({ label }: { label: string }) => (
   </svg>
 );
 
+// Made by Pro with a real key; they carry nothing from it
+const SAMPLES = [
+  ["xlsxflow-template-template.xlsx", "A report template, with {{placeholders}}"],
+  ["xlsxflow-template-and-chart.xlsx", "The same template filled with 12 months, plus a chart"],
+  ["xlsxflow-pivot-tables.xlsx", "2,000 orders and two pivot tables"],
+  ["xlsxflow-password-xlsxflow.xlsx", "Saved with a password (it's xlsxflow)"],
+];
+
 const link = "underline decoration-grid underline-offset-4 hover:decoration-accent";
 
 // Read once at build time, so visitors' browsers never call GitHub. Hidden when unknown or zero.
@@ -250,6 +258,15 @@ export default async function Home() {
                 <li>Build servers and CI don&apos;t need their own key.</li>
                 <li>Full refund within 14 days if it doesn&apos;t work for you, processed by Polar.</li>
               </ul>
+              <div>
+                <h3 className="font-semibold mb-2">See what Pro makes</h3>
+                <p className="text-muted mb-2">Files made by Pro. Open them in Excel or LibreOffice.</p>
+                <ul className="flex flex-col gap-1.5 text-muted">
+                  {SAMPLES.map(([file, what]) => (
+                    <li key={file}><a href={`/samples/${file}`} download className={`${link} text-ink`}>{what}</a></li>
+                  ))}
+                </ul>
+              </div>
               <div>
                 <h3 className="font-semibold mb-2">How it works</h3>
                 <ol className="flex flex-col gap-2 list-decimal pl-5 text-muted">
