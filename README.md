@@ -28,7 +28,7 @@ Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files
 
 - **No dependencies**: TypeScript on Web APIs (`ReadableStream`, `CompressionStream`, `Blob`).
 - **Streaming**: rows are read and written one at a time, so memory stays flat as files grow (10M cells written with about 1 MB of extra heap; see [Benchmarks](#benchmarks)).
-- **Runs anywhere with Web APIs**: tested on Node 20.12+, Bun and browsers. Deno and Cloudflare Workers provide the same APIs but are not tested yet.
+- **Runs anywhere with Web APIs**: tested on Node 20.12+, Bun, browsers and Cloudflare Workers (without `nodejs_compat`). Deno provides the same APIs but is not tested yet.
 - **Read, write and edit**: stream rows out of a file, generate one on the fly, or change cells, rows, columns and sheets of an existing file while keeping everything else in it.
 - **Styles and formulas**: fonts, fills, borders, alignment, number formats, conditional formats, validations, tables, notes, hyperlinks, autofilters, images, protection and page setup. Formulas and styles read back too.
 
@@ -263,6 +263,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 - **Fixed:** sheets with frozen panes were all marked as selected, so Excel opened them grouped.
 - **New:** `{ formatted: true }` reports each cell's text as Excel shows it, from its number format.
 - **Tested:** `.xlsm` files keep their macros through `SheetEditor`.
+- **Tested:** runs in Cloudflare Workers without `nodejs_compat`; `scripts/workers` checks it.
 - **Corrected benchmarks:** the earlier ExcelJS write time (13.5 s) came from a cold first run; warm, it is 1.8 s. write-excel-file was listed as running out of memory, but the harness used its old API and never ran it. Failures are now reported as failures, not out-of-memory.
 - **New:** `SheetEditor.insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move cells in existing files, with every reference to them: formulas on all sheets, defined names, merges, conditional formats, validations, hyperlinks, filters, page breaks, column widths, tables, pictures, notes, sparklines, data tables, chart series and pivot sources.
 - **New:** `SheetEditor` restyles existing cells (`setCells` with `style`), adds sheets (`addSheet`) and deletes them (`deleteSheet`); `parseCsv` streams CSV rows, which `SheetWriter.addSheet` turns into xlsx; notes take formatted text runs.

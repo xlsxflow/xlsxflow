@@ -12,3 +12,4 @@ test-xml.xlsx
 packages/core/scripts/worker.js
 packages/core/README.md
 packages/core/scripts/libreoffice/out/
+.wrangler/
