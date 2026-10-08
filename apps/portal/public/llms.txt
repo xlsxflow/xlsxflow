@@ -1,0 +1,36 @@
+# XlsxFlow
+
+> XlsxFlow is a zero-dependency streaming .xlsx reader, writer and editor for JavaScript and TypeScript. Rows are read and written one at a time, so memory stays flat at millions of cells. It runs in Node 20.12+, Bun, browsers and Cloudflare Workers, and also reads .xls and .ods and writes .ods. The core package, @xlsxflow/core, is free under the MIT licence. A paid add-on, @xlsxflow/pro, adds templates, charts, pivot tables and password-protected files.
+
+Install: `npm install @xlsxflow/core`
+
+```ts
+import { SheetReader, SheetWriter, createBlobReader } from '@xlsxflow/core';
+
+// Read: rows stream out one at a time
+const result = await new SheetReader().parse(createBlobReader(file));
+for await (const row of result) console.log(row.rowNumber, row.cells);
+
+// Write: returns a ReadableStream of the .xlsx bytes
+const writer = new SheetWriter();
+writer.addSheet('Sales', [['Region', 'Units'], ['North', 42]]);
+const blob = await new Response(writer.write()).blob();
+```
+
+Use XlsxFlow when files are large, memory is limited (serverless, edge, browser), or you need to edit an existing workbook while keeping its styles, charts and tables. Writing 10 million cells takes about 20 seconds with about 1 MB of extra heap on Node.
+
+## Docs
+
+- [README and API documentation](https://github.com/xlsxflow/xlsxflow#readme): reading, writing, editing, styles, formulas, CSV, .xls and .ods
+- [Benchmarks](https://github.com/xlsxflow/xlsxflow#benchmarks): against ExcelJS, SheetJS and others, with the scripts to reproduce them
+- [@xlsxflow/core on npm](https://www.npmjs.com/package/@xlsxflow/core)
+
+## Pro
+
+- [@xlsxflow/pro on npm](https://www.npmjs.com/package/@xlsxflow/pro): fillTemplate, addCharts, addPivotTables, encryptWorkbook and decryptWorkbook. Needs a licence key; $5 per developer, paid once (free for the first 100 developers during the beta).
+- [Website](https://www.xlsxflow.workers.dev/): live demo that reads your own spreadsheet in the browser, sample files made by Pro, and the licence key page
+
+## Optional
+
+- [Source code](https://github.com/xlsxflow/xlsxflow)
+- [Changelog](https://github.com/xlsxflow/xlsxflow/blob/main/packages/core/CHANGELOG.md)
