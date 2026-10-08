@@ -10,7 +10,7 @@ export default function LicenceForm() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
