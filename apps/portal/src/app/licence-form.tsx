@@ -1,6 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+
+type Result = { success: boolean; license?: string; error?: string; pending?: boolean };
+
+async function request(body: object): Promise<Result> {
+  const res = await fetch("/api/licence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`The licence service answered ${res.status}. Try again in a few minutes.`);
+  return await res.json() as Result;
+}
 
 export default function LicenceForm() {
   const [orderId, setOrderId] = useState("");
@@ -9,15 +17,41 @@ export default function LicenceForm() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  // Read on the client only: the page is prerendered without a query string
+  const checkoutId = useSyncExternalStore(() => () => {}, () => new URLSearchParams(location.search).get("checkout_id"), () => null);
+  const confirming = !!checkoutId && !key && !error;
+
+  // Polar sends buyers back with ?checkout_id=…; the order shows up a few seconds after payment
+  useEffect(() => {
+    if (!checkoutId) return;
+    let stopped = false;
+    (async () => {
+      try {
+        for (let attempt = 0; attempt < 10 && !stopped; attempt++) {
+          const result = await request({ checkoutId });
+          if (stopped) return;
+          if (result.success) {
+            setKey(result.license!);
+            history.replaceState(null, "", `${location.pathname}#licence`);
+            return;
+          }
+          if (!result.pending) { setError(result.error ?? "The licence service gave no reason."); return; }
+          await new Promise(r => setTimeout(r, 3000));
+        }
+        if (!stopped) setError("Your payment is taking longer than usual to confirm. Reload this page in a minute, or enter the order ID from your receipt below.");
+      } catch (e) {
+        if (!stopped) setError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => { stopped = true; };
+  }, [checkoutId]);
 
   const submit = async (e: React.SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const res = await fetch("/api/licence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId, email }) });
-      if (!res.ok) throw new Error(`The licence service answered ${res.status}. Try again in a few minutes.`);
-      const result = await res.json() as { success: boolean; license?: string; error?: string };
+      const result = await request({ orderId, email });
       if (result.success) setKey(result.license!);
       else setError(result.error ?? "The licence service gave no reason. Try again in a few minutes.");
     } catch (e) {
@@ -47,6 +81,7 @@ export default function LicenceForm() {
 
   return (
     <div className="border border-grid p-5 sm:p-6">
+      {confirming && <p role="status" className="mb-4 text-sm">Thanks for buying. Confirming your payment and making your key…</p>}
       <form onSubmit={submit} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-medium">Order ID</span>

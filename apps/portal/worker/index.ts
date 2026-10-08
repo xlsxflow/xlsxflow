@@ -28,15 +28,20 @@ async function createLicenseKey(orderId: string, privateKey: string): Promise<st
   return `${payload}.${base64url(signature)}`;
 }
 
-async function issueLicence(body: unknown, env: Env): Promise<{ success: true; license: string } | { success: false; error: string }> {
+type Order = { id?: unknown; checkout_id?: unknown; customer?: { email?: unknown }; product_id?: unknown; status?: unknown };
+type Result = { success: true; license: string } | { success: false; error: string; pending?: true };
+
+async function issueLicence(body: unknown, env: Env): Promise<Result> {
   try {
-    const { orderId: rawId, email } = (body ?? {}) as { orderId?: unknown; email?: unknown };
-    // Polar order IDs are UUIDs; checking the shape keeps the URL below to exactly one order
-    if (typeof rawId !== "string" || !ORDER_ID.test(rawId.trim())) {
+    const { orderId: rawId, email, checkoutId } = (body ?? {}) as { orderId?: unknown; email?: unknown; checkoutId?: unknown };
+    // Polar IDs are UUIDs; checking the shape keeps the URLs below to exactly one order or checkout
+    if (checkoutId === undefined && (typeof rawId !== "string" || !ORDER_ID.test(rawId.trim()))) {
       throw new Refusal("That doesn't look like a Polar order ID. Copy it from your receipt.");
     }
-    const orderId = rawId.trim().toLowerCase();
-    if (typeof email !== "string" || !email.includes("@")) throw new Refusal("Enter the email you bought with.");
+    if (checkoutId !== undefined && (typeof checkoutId !== "string" || !ORDER_ID.test(checkoutId))) {
+      throw new Refusal("That checkout link is incomplete. Enter your order ID and email instead.");
+    }
+    if (checkoutId === undefined && (typeof email !== "string" || !email.includes("@"))) throw new Refusal("Enter the email you bought with.");
 
     const { POLAR_ACCESS_TOKEN: token, POLAR_PRODUCT_ID: productId, LICENSE_PRIVATE_KEY: privateKey } = env;
     if (!token || !productId || !privateKey) throw new Error("POLAR_ACCESS_TOKEN, POLAR_PRODUCT_ID or LICENSE_PRIVATE_KEY is not set.");
@@ -46,19 +51,37 @@ async function issueLicence(body: unknown, env: Env): Promise<{ success: true; l
       throw new Error("POLAR_API_URL points at the Polar sandbox. Set ALLOW_SANDBOX=1 only for a test deployment.");
     }
 
-    const res = await fetch(`${apiUrl}/${orderId}`, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      if (res.status === 404 || res.status === 422) throw new Refusal("Order not found or invalid.");
-      throw new Error(`Polar API error: ${res.status} ${res.statusText}`);
+    const headers = { Authorization: `Bearer ${token}` };
+    let order: Order;
+    if (typeof checkoutId === "string") {
+      // The checkout ID comes from Polar's redirect after payment and isn't on receipts, so it is
+      // enough on its own. The order appears a few seconds after the redirect.
+      const res = await fetch(`${apiUrl}/?checkout_id=${checkoutId.toLowerCase()}&limit=1`, { headers });
+      if (!res.ok) {
+        if (res.status === 422) throw new Refusal("That checkout link is incomplete. Enter your order ID and email instead.");
+        throw new Error(`Polar API error: ${res.status} ${res.statusText}`);
+      }
+      // Checked again here: if Polar ever ignored the filter, any buyer's order would come back
+      const found = (await res.json() as { items?: Order[] }).items?.find(o => String(o.checkout_id).toLowerCase() === checkoutId.toLowerCase());
+      if (!found) return { success: false, pending: true, error: "Your payment is still being confirmed." };
+      order = found;
+    } else {
+      const res = await fetch(`${apiUrl}/${(rawId as string).trim().toLowerCase()}`, { headers });
+      if (!res.ok) {
+        if (res.status === 404 || res.status === 422) throw new Refusal("Order not found or invalid.");
+        throw new Error(`Polar API error: ${res.status} ${res.statusText}`);
+      }
+      order = await res.json() as Order;
+      // The order ID is printed on receipts, so it alone must not be enough. Same message as an
+      // unknown order, so the form can't be used to test which emails bought.
+      const buyer = order.customer?.email;
+      if (typeof buyer !== "string" || buyer.trim().toLowerCase() !== (email as string).trim().toLowerCase()) {
+        throw new Refusal("Order not found or invalid.");
+      }
     }
-    const order = await res.json() as { customer?: { email?: unknown }; product_id?: unknown; status?: unknown };
-
-    // The order ID is printed on receipts, so it alone must not be enough. Same message as an
-    // unknown order, so the form can't be used to test which emails bought.
-    const buyer = order.customer?.email;
-    if (typeof buyer !== "string" || buyer.trim().toLowerCase() !== email.trim().toLowerCase()) {
-      throw new Refusal("Order not found or invalid.");
-    }
+    if (typeof order.id !== "string" || !ORDER_ID.test(order.id)) throw new Error("Polar returned an order without an ID.");
+    const orderId = order.id.toLowerCase();
+    if (order.status === "pending") return { success: false, pending: true, error: "Your payment is still being confirmed." };
     // The product decides the tier, not the amount: discounts change the price
     if (order.product_id !== productId) throw new Refusal("This order is not for XlsxFlow Pro.");
     if (order.status !== "paid") {
