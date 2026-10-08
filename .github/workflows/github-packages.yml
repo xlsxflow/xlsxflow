@@ -1,0 +1,33 @@
+name: Publish to GitHub Packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: '@xlsxflow'
+      - run: pnpm install --frozen-lockfile --filter @xlsxflow/core
+      - run: pnpm test
+        working-directory: packages/core
+      - run: pnpm pack
+        working-directory: packages/core
+      - run: npm publish xlsxflow-core-*.tgz --registry https://npm.pkg.github.com
+        working-directory: packages/core
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
