@@ -3,3 +3,7 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# Share image from app/opengraph-image.tsx; it has no file extension to infer the type from
+/opengraph-image
+  Content-Type: image/png
