@@ -326,3 +326,24 @@ function fmtDate(toks: Tok[], v: number, date1904: boolean): string {
     }
   }).join('');
 }
+
+// Number formats Excel does not write into styles.xml (ECMA-376 Part 1, 18.8.30)
+export const BUILTIN_NUM_FMTS: [number, string][] = [
+  [1, '0'], [2, '0.00'], [3, '#,##0'], [4, '#,##0.00'], [9, '0%'], [10, '0.00%'], [11, '0.00E+00'],
+  [12, '# ?/?'], [13, '# ??/??'], [14, 'mm-dd-yy'], [15, 'd-mmm-yy'], [16, 'd-mmm'], [17, 'mmm-yy'],
+  [18, 'h:mm AM/PM'], [19, 'h:mm:ss AM/PM'], [20, 'h:mm'], [21, 'h:mm:ss'], [22, 'm/d/yy h:mm'],
+  [37, '#,##0 ;(#,##0)'], [38, '#,##0 ;[Red](#,##0)'], [39, '#,##0.00;(#,##0.00)'], [40, '#,##0.00;[Red](#,##0.00)'],
+  [45, 'mm:ss'], [46, '[h]:mm:ss'], [47, 'mmss.0'], [48, '##0.0E+0'], [49, '@'],
+];
+
+// Formats Excel stores by id only and shows by locale, as en-US Excel shows them
+export const DISPLAY_NUM_FMTS = new Map<number, string>([
+  [5, '"$"#,##0_);("$"#,##0)'], [6, '"$"#,##0_);[Red]("$"#,##0)'], [7, '"$"#,##0.00_);("$"#,##0.00)'], [8, '"$"#,##0.00_);[Red]("$"#,##0.00)'],
+  [14, 'm/d/yyyy'], [22, 'm/d/yyyy h:mm'],
+  [41, '_(* #,##0_);_(* \\(#,##0\\);_(* "-"_);_(@_)'], [42, '_("$"* #,##0_);_("$"* \\(#,##0\\);_("$"* "-"_);_(@_)'],
+  [43, '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'], [44, '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)'],
+]);
+
+// Builtin date/time ids (27-36 and 50-58 are dates in CJK locales)
+export const isBuiltinDateFormat = (id: number) =>
+  (id >= 14 && id <= 22) || (id >= 27 && id <= 36) || (id >= 45 && id <= 47) || (id >= 50 && id <= 58);

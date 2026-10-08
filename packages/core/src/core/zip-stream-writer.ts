@@ -8,6 +8,12 @@ const CRC_TABLE = (() => {
   return t;
 })();
 
+export function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 const MAX_U32 = 0xffffffff;
 
 // No ZIP64 support: fail loudly instead of writing a corrupt archive.

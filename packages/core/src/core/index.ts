@@ -5,6 +5,10 @@ import { parseWorksheet, parseComments, ParseResult, RichTextCollector } from '.
 import { resolveWorkbookParts, partRelationships, hyperlinkTargets, decodeXString, isDateFormatCode, attr, unescapeXml, xmlElements } from './utils';
 import { parseThemeColors, colorResolver, applyFontElement, ColorResolver } from './style-reader';
 import { readSheetImages } from './image';
+import { BUILTIN_NUM_FMTS, DISPLAY_NUM_FMTS, isBuiltinDateFormat } from './number-format';
+import { CfbReader, isCfb } from './cfb';
+import { XlsWorkbook } from './xls';
+import { ODS_MIMETYPE, parseOds, readOdsWorkbook } from './ods';
 import type { CellStyle, CellFont, CellFill, GradientFill, CellBorder, BorderSide, CellAlignment, RichTextRun, DefinedName, WorkbookProperties } from './types';
 export { SheetWriter } from './writer';
 export { createFileReader, createBlobReader, type RandomAccessReader } from './random-access';
@@ -23,24 +27,22 @@ export interface ParseOptions {
   formatted?: boolean; // report each cell's text as Excel shows it (en-US) in RowData.formatted
 }
 
-// Number formats Excel does not write into styles.xml (ECMA-376 Part 1, 18.8.30)
-const BUILTIN_NUM_FMTS: [number, string][] = [
-  [1, '0'], [2, '0.00'], [3, '#,##0'], [4, '#,##0.00'], [9, '0%'], [10, '0.00%'], [11, '0.00E+00'],
-  [12, '# ?/?'], [13, '# ??/??'], [14, 'mm-dd-yy'], [15, 'd-mmm-yy'], [16, 'd-mmm'], [17, 'mmm-yy'],
-  [18, 'h:mm AM/PM'], [19, 'h:mm:ss AM/PM'], [20, 'h:mm'], [21, 'h:mm:ss'], [22, 'm/d/yy h:mm'],
-  [37, '#,##0 ;(#,##0)'], [38, '#,##0 ;[Red](#,##0)'], [39, '#,##0.00;(#,##0.00)'], [40, '#,##0.00;[Red](#,##0.00)'],
-  [45, 'mm:ss'], [46, '[h]:mm:ss'], [47, 'mmss.0'], [48, '##0.0E+0'], [49, '@'],
-];
-
-// Formats Excel stores by id only and shows by locale, as en-US Excel shows them
-const DISPLAY_NUM_FMTS = new Map<number, string>([
-  [5, '"$"#,##0_);("$"#,##0)'], [6, '"$"#,##0_);[Red]("$"#,##0)'], [7, '"$"#,##0.00_);("$"#,##0.00)'], [8, '"$"#,##0.00_);[Red]("$"#,##0.00)'],
-  [14, 'm/d/yyyy'], [22, 'm/d/yyyy h:mm'],
-  [41, '_(* #,##0_);_(* \\(#,##0\\);_(* "-"_);_(@_)'], [42, '_("$"* #,##0_);_("$"* \\(#,##0\\);_("$"* "-"_);_(@_)'],
-  [43, '_(* #,##0.00_);_(* \\(#,##0.00\\);_(* "-"??_);_(@_)'], [44, '_("$"* #,##0.00_);_("$"* \\(#,##0.00\\);_("$"* "-"??_);_(@_)'],
-]);
-
 const DEFAULT_MAX_PART_BYTES = 1 << 30;
+
+// OpenDocument files name their type in a `mimetype` entry
+const isOds = async (zip: ZipRandomAccessParser, readText: (name: string) => Promise<string>) =>
+  zip.has('mimetype') && zip.has('content.xml') && (await readText('mimetype')).trim() === ODS_MIMETYPE;
+
+// Compound files (.xls, and .xlsx saved with a password) are read whole, so their size is capped
+async function openCompound(reader: RandomAccessReader, maxBytes = DEFAULT_MAX_PART_BYTES): Promise<XlsWorkbook | undefined> {
+  if (reader.size < 8 || !isCfb(await reader.read(0, 8))) return undefined;
+  if (reader.size > maxBytes) throw new Error(`Security Error: the ${reader.size}-byte file is larger than maxUncompressedBytes (${maxBytes}).`);
+  const cfb = new CfbReader(await reader.read(0, reader.size));
+  if (cfb.has('EncryptionInfo')) {
+    throw new Error('This workbook is password-protected. Decrypt it first with decryptWorkbook from @xlsxflow/pro, or save it without a password in Excel.');
+  }
+  return new XlsWorkbook(cfb);
+}
 
 export interface WorkbookInfo {
   sheets: { name: string; state: 'visible' | 'hidden' | 'veryHidden' }[]; // in tab order
@@ -78,12 +80,18 @@ export async function readSharedStrings(stream: ReadableStream<Uint8Array>): Pro
 export class SheetReader {
   // Sheet names and visibility, defined names and document properties, without reading any sheet
   async readWorkbook(reader: RandomAccessReader, options?: Pick<ParseOptions, 'maxUncompressedBytes'>): Promise<WorkbookInfo> {
+    const xls = await openCompound(reader, options?.maxUncompressedBytes);
+    if (xls) return { sheets: xls.sheets.map(({ name, state }) => ({ name, state })), definedNames: xls.definedNames, properties: xls.properties };
     const zip = new ZipRandomAccessParser(reader);
     await zip.parseCentralDirectory();
     const max = options?.maxUncompressedBytes ?? DEFAULT_MAX_PART_BYTES;
     const readText = async (name: string) => zip.has(name)
       ? this.readStreamToString(max !== Infinity ? (await zip.extractStream(name)).pipeThrough(createByteLimitStream(max)) : await zip.extractStream(name))
       : '';
+    if (await isOds(zip, readText)) {
+      const content = async () => { const st = await zip.extractStream('content.xml'); return max !== Infinity ? st.pipeThrough(createByteLimitStream(max)) : st; };
+      return readOdsWorkbook(content, readText);
+    }
     const parts = await resolveWorkbookParts(readText);
 
     const sheets: WorkbookInfo['sheets'] = [];
@@ -122,6 +130,8 @@ export class SheetReader {
   }
 
   async parse(reader: RandomAccessReader, options?: ParseOptions): Promise<ParseResult> {
+    const xls = await openCompound(reader, options?.maxUncompressedBytes);
+    if (xls) return xls.parseSheet(options?.sheetName, !!options?.formatted);
     const zip = new ZipRandomAccessParser(reader);
     await zip.parseCentralDirectory();
 
@@ -131,6 +141,10 @@ export class SheetReader {
       max !== Infinity ? st.pipeThrough(createByteLimitStream(max)) : st;
     const readText = async (name: string) =>
       zip.has(name) ? this.readStreamToString(limit(await zip.extractStream(name))) : '';
+    if (await isOds(zip, readText)) {
+      const content = async () => limit(await zip.extractStream('content.xml'), options?.maxUncompressedBytes ?? Infinity);
+      return parseOds(content, readText, { sheetName: options?.sheetName, formulas: options?.formulas, formatted: options?.formatted, maxPaddingCells: options?.maxUncompressedBytes });
+    }
 
     // 1. Locate workbook, sheets, shared strings and styles via package relationships
     const parts = await resolveWorkbookParts(readText);
@@ -320,9 +334,7 @@ export class SheetReader {
                 if (section === 'cellXfs') {
                   const index = cellStyles.length;
                   const numFmtId = parseInt(a['numFmtId'] || '0', 10);
-                  // Builtin date/time ids (27-36 and 50-58 are dates in CJK locales)
-                  const isDate = (numFmtId >= 14 && numFmtId <= 22) || (numFmtId >= 27 && numFmtId <= 36)
-                    || (numFmtId >= 45 && numFmtId <= 47) || (numFmtId >= 50 && numFmtId <= 58) || customDateFmts.has(numFmtId);
+                  const isDate = isBuiltinDateFormat(numFmtId) || customDateFmts.has(numFmtId);
                   dateStyles.set(index, isDate ? 14 : 0);
                   formats.push(DISPLAY_NUM_FMTS.get(numFmtId) ?? numFmts.get(numFmtId));
 
