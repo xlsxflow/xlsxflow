@@ -16,6 +16,8 @@
   "type": "module",
   "keywords": [
     "xlsx",
+    "xls",
+    "ods",
     "excel",
     "spreadsheet",
     "streaming",
