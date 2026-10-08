@@ -12,7 +12,7 @@ export default function Privacy() {
   return (
     <main className="flex-1">
       <div className="max-w-prose mx-auto px-4 sm:px-6 py-12 sm:py-16 flex flex-col gap-4 leading-relaxed">
-        <Link href="/" className="flex items-center gap-2 font-semibold"><img src="/icon.svg" alt="" className="w-6 h-6" />XlsxFlow</Link>
+        <Link href="/" className="flex items-center gap-2 font-semibold"><img src="/icon.svg" alt="XlsxFlow logo" aria-hidden className="w-6 h-6" />XlsxFlow</Link>
         <h1 className="display text-[48px] mt-6">Privacy</h1>
         <p className="text-muted text-sm">Last updated 8 October 2026</p>
 

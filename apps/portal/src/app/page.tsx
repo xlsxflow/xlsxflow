@@ -92,7 +92,7 @@ export default async function Home() {
       <header className="border-b border-grid">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2 font-semibold text-[17px]">
-            <img src="/icon.svg" alt="" className="w-7 h-7" />
+            <img src="/icon.svg" alt="XlsxFlow logo" aria-hidden className="w-7 h-7" />
             XlsxFlow
           </Link>
           <nav className="flex items-center gap-4 sm:gap-6 text-sm text-muted">

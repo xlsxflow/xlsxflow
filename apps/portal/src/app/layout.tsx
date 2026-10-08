@@ -17,7 +17,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.xlsxflow.workers.dev"),
   title: "XlsxFlow: streaming Excel (.xlsx) reader and writer for JavaScript",
-  description: "Read, write and edit .xlsx files as a stream in Node, Bun, browsers and Cloudflare Workers, with flat memory at millions of cells. Zero dependencies, MIT licence. Also reads .xls and .ods.",
+  description: "Read, write and edit .xlsx files as a stream in Node, Bun, browsers and Cloudflare Workers. Flat memory at millions of cells, zero dependencies, MIT.",
   alternates: { canonical: "/" },
   openGraph: {
     type: "website",
