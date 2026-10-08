@@ -6,9 +6,10 @@ export async function sheetToJson<T = Record<string, CellValue>>(
 ): Promise<T[]> {
   const results: T[] = [];
   let headers: string[] = [];
+  let skip = headerRowIndex; // rows above the header, counted as the reader yields them
 
   for await (const row of parseResult) {
-    // Treat the first row we get as the header
+    if (skip-- > 0) continue;
     if (headers.length === 0) {
       headers = row.cells.map((c, i) => (c !== null && c !== undefined ? String(c) : `Column${i + 1}`));
       continue;

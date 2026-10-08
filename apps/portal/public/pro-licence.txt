@@ -1,0 +1,136 @@
+XlsxFlow Pro Licence Agreement
+
+Copyright (c) 2026 Omkar Palika. All rights reserved.
+
+This agreement is between Omkar Palika ("Licensor") and the person or the
+organisation that buys or uses XlsxFlow Pro ("you"). By installing, copying or
+using XlsxFlow Pro, you agree to it. If you do not agree, do not use it.
+
+XlsxFlow Pro is not open source. The MIT License of @xlsxflow/core does not
+apply to it.
+
+1. Definitions
+
+   "Software" means the @xlsxflow/pro package: its code, types and
+   documentation, in every version you are given under this agreement.
+
+   "Licence Key" means the key issued for one paid order.
+
+   "Developer" means a person who writes, changes or maintains code that
+   calls the Software.
+
+   "Application" means a product or service made by you or for you that uses
+   the Software and adds substantial features of its own.
+
+2. Licence
+
+   For each Licence Key you have paid for, the Licensor grants you a
+   perpetual, worldwide, non-exclusive, non-transferable licence for one
+   Developer to:
+
+   a) use the Software to build, test and run Applications, for any purpose,
+      including commercial use;
+   b) deploy those Applications on any number of computers, servers,
+      browsers, devices and cloud or edge services, for any number of end
+      users;
+   c) distribute the Software to third parties only as part of an
+      Application, in bundled, compiled or minified form, together with the
+      Licence Key that the Application needs to run.
+
+   Every Developer needs their own Licence Key. Build servers and test
+   systems do not need one. One person may use one Licence Key on all of
+   their own computers.
+
+3. Updates
+
+   You may use every version released up to one year after the date of your
+   order, and keep using those versions forever. Using a version released
+   later requires a new order. The Licensor has no duty to release updates
+   or to provide support.
+
+4. Restrictions
+
+   You may not:
+
+   a) sell, sublicense, rent or share the Software or a Licence Key other
+      than as section 2(c) allows;
+   b) distribute the Software as a stand-alone library, or as part of a
+      library, framework, SDK or tool whose main purpose is to let others
+      read, write, edit or fill spreadsheet files;
+   c) publish a Licence Key, or the Software's source code, in a public
+      repository or anywhere else open to the public, except inside an
+      Application under section 2(c);
+   d) remove, disable or work around the Licence Key check, or help anyone
+      else do so;
+   e) remove copyright notices or this agreement from the Software.
+
+   Reverse engineering is allowed only to the extent that applicable law
+   allows it despite this restriction.
+
+5. Ownership
+
+   The Licensor keeps all rights, title and intellectual property in the
+   Software. You own the Applications you build and the files they create.
+   The Software works with @xlsxflow/core, which is licensed separately
+   under the MIT License; this agreement does not change that licence.
+
+6. Price, payment and refunds
+
+   Polar Software, Inc. sells the Software as merchant of record, and its
+   buyer terms cover payment, taxes and invoices. If the Software does not
+   work for you, you may ask for a full refund within 14 days of your
+   order. After a refund, your Licence Key and this licence end.
+
+7. Data
+
+   The Software checks the Licence Key offline. It does not contact the
+   Licensor or anyone else, and it does not collect or send data about you,
+   your Applications or their users.
+
+8. No warranty
+
+   To the extent the law allows, the Software is provided "as is", without
+   warranty of any kind, express or implied, including warranties of
+   merchantability, fitness for a particular purpose and non-infringement.
+   The Licensor does not promise that the Software is free of errors or
+   that every spreadsheet program will open the files it produces.
+
+9. Limitation of liability
+
+   To the extent the law allows, the Licensor is not liable for any
+   indirect, incidental, special or consequential damages, or for lost
+   profits, revenue or data, arising from this agreement or the Software.
+   The Licensor's total liability under this agreement is limited to the
+   amount you paid for the Licence Key concerned. Nothing in this agreement
+   limits a liability that the law does not allow to be limited, or the
+   rights a consumer has under the law of their country.
+
+10. Termination
+
+    This licence ends automatically if you breach it and do not cure the
+    breach within 30 days of notice. A breach of section 4(a), 4(c) or 4(d)
+    ends it at once, without notice. When it ends, you must stop using the
+    Software and delete your copies. Copies of the Software already
+    distributed to end users inside an Application before the licence ended
+    may stay in use. Sections 4, 5, 8, 9, 11 and 12 survive termination.
+
+11. Governing law
+
+    This agreement is governed by the laws of India. The courts of India
+    with jurisdiction over the Licensor's place of residence have exclusive
+    jurisdiction over any dispute arising from it. This does not take away
+    a consumer's right to bring a claim where the law of their country
+    allows it.
+
+12. General
+
+    This agreement, together with the order you placed, is the whole
+    agreement between you and the Licensor about the Software. If a part of
+    it is held unenforceable, the rest stays in force. A failure to enforce
+    a term is not a waiver of it. You may not transfer this agreement
+    without the Licensor's written consent. The Licensor may transfer this
+    agreement to a company it controls or to a buyer of the Software, who
+    then takes the Licensor's place. A separate written agreement
+    signed by the Licensor takes precedence over this one.
+
+    Questions about this agreement: palikaomkar.22.cse@anits.edu.in

@@ -1,7 +1,7 @@
 {
   "name": "@xlsxflow/core",
   "version": "1.1.0",
-  "description": "Streaming, zero-dependency .xlsx reader and writer for Node, browsers and Edge runtimes",
+  "description": "Streaming, zero-dependency .xlsx reader, writer and editor for Node, Bun, browsers and Cloudflare Workers",
   "license": "MIT",
   "author": "Omkar Palika",
   "homepage": "https://github.com/xlsxflow/xlsxflow#readme",
@@ -21,7 +21,12 @@
     "streaming",
     "ooxml",
     "edge",
-    "cloudflare-workers"
+    "cloudflare-workers",
+    "reader",
+    "writer",
+    "csv",
+    "browser",
+    "typescript"
   ],
   "sideEffects": false,
   "engines": {
@@ -53,7 +58,8 @@
   "files": [
     "dist",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "rollup -c",

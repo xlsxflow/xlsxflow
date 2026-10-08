@@ -63,6 +63,6 @@ export async function validateOrderAndGenerateLicense(orderId: string, email: st
   } catch (error) {
     if (error instanceof Refusal) return { success: false, error: error.message };
     console.error("License request failed:", error);
-    return { success: false, error: "Something went wrong on our side. Please try again later." };
+    return { success: false, error: "Something went wrong on our side. Please try again later, or email palikaomkar.22.cse@anits.edu.in with your order ID." };
   }
 }

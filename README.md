@@ -3,18 +3,18 @@
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/xlsxflow/xlsxflow/main/assets/logo-wordmark-dark.svg" />
     <img src="https://raw.githubusercontent.com/xlsxflow/xlsxflow/main/assets/logo-wordmark.svg" alt="XlsxFlow" width="320" />
   </picture>
-  <p><strong>The modern, streaming Excel engine for the web.</strong></p>
+  <p><strong>Streaming .xlsx reader, writer and editor for JavaScript.</strong></p>
   
   [![npm version](https://img.shields.io/npm/v/@xlsxflow/core.svg?style=flat-square)](https://www.npmjs.com/package/@xlsxflow/core)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
-  [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
 
   <p>
     <a href="#features">Features</a> •
     <a href="#installation">Installation</a> •
     <a href="#quick-start">Quick Start</a> •
     <a href="#styles-formulas--conditional-formats">Styles &amp; Formulas</a> •
-    <a href="#benchmarks">Benchmarks</a>
+    <a href="#benchmarks">Benchmarks</a> •
+    <a href="#free-and-pro">Free and Pro</a>
   </p>
 </div>
 
@@ -22,7 +22,7 @@
 
 **XlsxFlow** is a zero-dependency streaming reader, writer and editor for OpenXML (`.xlsx`) files. Built on native Web APIs (like `TransformStream` and `CompressionStream`), it handles millions of cells in flat memory.
 
-Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files chunk-by-chunk on the fly, so it suits browsers, servers and edge runtimes that provide the same Web APIs.
+Rows are read and written one at a time instead of loading the whole workbook, so it suits browsers, servers and edge runtimes alike.
 
 ## Features
 
@@ -53,7 +53,7 @@ yarn add @xlsxflow/core
 import { SheetReader, createBlobReader } from '@xlsxflow/core';
 
 // Browser / Edge: any Blob or File (e.g. from <input type="file">)
-const blob = await fetch('https://example.com/massive-data.xlsx').then(r => r.blob());
+const blob = await fetch('https://example.com/data.xlsx').then(r => r.blob());
 
 const reader = new SheetReader();
 // Omit sheetName to read the first tab
@@ -81,7 +81,9 @@ Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB unco
 
 **Reading files from untrusted users** (uploads on a server): set `maxUncompressedBytes` to what you expect, such as `50_000_000`. Corrupt or crafted ZIPs (overlapping entries, entries that inflate past their stated size, directories pointing outside the file) are rejected either way. The limit also bounds the empty cells added before far-right cells, since one tiny cell in column XFD pads its row to 16,384 values. Values are returned as written: hyperlinks may be `javascript:` URLs and text may start with `=`, so check them before putting them in a web page or a CSV that a spreadsheet will open.
 
-In Node.js, read straight from disk:
+`sheetToJson(rows, headerRowIndex = 0)` turns the rows into objects keyed by the header row, and `streamToCsv(rows)` returns the sheet as CSV text. Both hold the whole result in memory.
+
+In Node.js, read straight from disk with `XlsxFlow.readFile`, or pass `await createFileReader(path)` to any function that takes a reader:
 
 ```typescript
 import { XlsxFlow } from '@xlsxflow/core';
@@ -162,7 +164,7 @@ Edited cells keep their style. A style change is merged into the cell's current 
 
 Macro-enabled workbooks (`.xlsm`) keep their VBA project and content type through every edit.
 
-`addSheet` takes values, formulas and styles; for hyperlinks, notes and sheet options, write the workbook with `SheetWriter`. `deleteSheet` removes names scoped to the sheet and turns other defined names that point at it into `#REF!`; formulas in other sheets that point at it are not rewritten. `insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move everything that points at the cells, as Excel does:
+`addSheet` takes an array of rows with values, formulas and styles; for hyperlinks, notes and sheet options, write the workbook with `SheetWriter`. `deleteSheet` removes names scoped to the sheet and turns other defined names that point at it into `#REF!`; formulas in other sheets that point at it are not rewritten. `insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move everything that points at the cells, as Excel does:
 - formulas on every sheet and the workbook's defined names (print areas, named ranges);
 - merged cells, conditional formats, validations, hyperlinks, the filter and its column filters, page breaks and column widths;
 - tables, pictures, notes, sparklines, What-If data tables, chart series and pivot-table sources.
@@ -193,7 +195,7 @@ writer.addSheet('Sales', [
 });
 ```
 
-More sheet options, matching what ExcelJS offers:
+Other sheet options:
 
 ```typescript
 writer.addSheet('Report', rows, {
@@ -209,10 +211,15 @@ writer.addSheet('Report', rows, {
   protection: { password: 'secret', sort: true },  // Excel's legacy hash: deters edits, is not encryption
   pageSetup: { orientation: 'landscape', paperSize: 9, fitToWidth: 1, fitToHeight: 0, printArea: 'A1:C100', printTitleRows: '1', footer: '&CPage &P of &N' },
   tabColor: 'FF00B050',
+  mergeCells: ['A1:C1'],
+  columnWidths: [30, 12],  // in characters; `columns[i].width` wins where both are set
+  autoFitColumns: true,    // widths from the longest value (array rows only)
 });
 // Notes: [{ value: 'Q3', comment: { text: 'Restated', author: 'Ana' } }]
 // Formatted notes: comment: { text: [{ text: 'Ana:', font: { bold: true } }, { text: ' restated' }] }
 ```
+
+Formulas are stored for Excel to calculate when it opens the file. For array rows, the writer also stores a cached result for simple formulas (`SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX`, `IF`, `CONCATENATE` and arithmetic), so other readers see a value.
 
 Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when values repeat, but the distinct strings stay in memory until the file is finished.
 
@@ -257,112 +264,26 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ---
 
+## Free and Pro
+
+`@xlsxflow/core` is free and MIT licensed, including every feature on this page. [`@xlsxflow/pro`](https://www.npmjs.com/package/@xlsxflow/pro) is a paid add-on with a licence key:
+
+| | Core (free) | Pro |
+|---|---|---|
+| Read, write and edit `.xlsx` / `.xlsm`, styles, formulas, images, tables, notes | Yes | Yes |
+| Fill Excel templates with data, repeating rows for lists | | Yes |
+| Add column, bar, line, area and pie charts | | Yes |
+
+Pro is $5 per developer (local pricing at checkout), with a perpetual licence and a year of updates. See the [Pro README](https://www.npmjs.com/package/@xlsxflow/pro) for details.
+
 ## Changelog
 
-### v1.1.0
+See [CHANGELOG.md](https://github.com/xlsxflow/xlsxflow/blob/main/packages/core/CHANGELOG.md).
 
-- **New:** workbook properties (title, author, company...), defined names, hidden and very hidden sheets, and sheet views (zoom, gridlines, headings, right-to-left) in `SheetWriter`; `SheetReader.readWorkbook` reads them back.
-- **Fixed:** sheets with frozen panes were all marked as selected, so Excel opened them grouped.
-- **New:** `{ formatted: true }` reports each cell's text as Excel shows it, from its number format.
-- **Tested:** `.xlsm` files keep their macros through `SheetEditor`.
-- **Tested:** runs in Cloudflare Workers without `nodejs_compat`; `scripts/workers` checks it.
-- **Security:** fixed crashes, hangs and memory blowups from crafted files: a ZIP directory pointing outside the file crashed Node; unclosed tags and elements made the parser quadratic; repeated hidden columns, far-right cells, fraction formats with long denominators and large style tables were slow or memory-hungry; one deflated entry could be read many times under different names. `SheetEditor.edit` takes `maxUncompressedBytes`. Option values typed as enums are now escaped, appended rows encode control characters, and `sheetToJson` keeps a `__proto__` header as an ordinary key.
-- **Corrected benchmarks:** the earlier ExcelJS write time (13.5 s) came from a cold first run; warm, it is 1.8 s. write-excel-file was listed as running out of memory, but the harness used its old API and never ran it. Failures are now reported as failures, not out-of-memory.
-- **New:** `SheetEditor.insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move cells in existing files, with every reference to them: formulas on all sheets, defined names, merges, conditional formats, validations, hyperlinks, filters, page breaks, column widths, tables, pictures, notes, sparklines, data tables, chart series and pivot sources.
-- **New:** `SheetEditor` restyles existing cells (`setCells` with `style`), adds sheets (`addSheet`) and deletes them (`deleteSheet`); `parseCsv` streams CSV rows, which `SheetWriter.addSheet` turns into xlsx; notes take formatted text runs.
-- **New, closing ExcelJS gaps:** `SheetEditor.setCells` edits cells of existing files; cell notes on write and `getComments()` on read; conditional formats `cellIs`, `expression`, `top10`, `aboveAverage`, text rules, `duplicateValues`/`uniqueValues` and `iconSet`; Excel tables; sheet protection; page setup, margins, header/footer, print area and titles; row heights, hidden rows/columns and outline grouping; tab colour; validation operators and messages.
-- **Changed:** `[Content_Types].xml` is now written last in the ZIP, since streamed sheets decide which parts exist. Readers use the ZIP's central directory, so entry order does not matter.
-- **Fixed: reader dropped/corrupted cells at stream chunk boundaries** (the XML tokenizer discarded buffered characters between chunks). Large files from ExcelJS/SheetJS now read back exactly.
-- **Fixed: styles pointed at the wrong font/fill/border** (off-by-one against the default entries), and styles used by `AsyncIterable` rows were missing from `styles.xml`.
-- **Real backpressure** in the ZIP writer and worksheet stream; producer errors now error the output stream instead of hanging it.
-- **Faster writes** via table-driven CRC-32 (1M numeric cells: ~1.6 s, previously ~32 s).
-- Reader resolves sheets from `workbook.xml` (first tab by default, absolute targets, any attribute order).
-- `SheetEditor`: handles empty `<sheetData/>`, copies untouched entries without recompressing, errors on unknown sheet names; now exported.
-- Formula cached values keep their type; aggregates ignore text/blanks like Excel; formulas evaluate against their own sheet.
-- Styles, formulas and conditional formatting are part of the MIT core (moved out of `src/pro`). Licensing code moved to a separate, unpublished `@xlsxflow/pro` package.
-- npm package now ships compiled ESM + CJS builds with bundled type declarations instead of TypeScript source.
-- Browser bundles no longer try to resolve Node `fs`.
-- **Fixed: numbers shown as dates.** Number formats with quoted text, escapes or colours (`#,##0.00 "USD"`, `0 "days"`, `[Red]0.0`) were detected as date formats, so their values were returned as dates.
-- **Fixed: unhandled promise rejection** (fatal in Node) when reading a corrupt file without calling `getMetadata()`. Corrupt ZIP entries now fail with an error that names the entry.
-- **Hostile-input hardening:** the XML tokenizer is linear-time on giant tags, text nodes and CDATA sections (was quadratic). Cell references beyond column XFD and oversized hidden-column ranges are rejected or clamped instead of allocating without bound.
-- **~2.5x faster reads:** the tokenizer emits one batch of tokens per chunk instead of one stream chunk per token.
-- Reader correctness:
-  - Workbook, sheets, shared strings and styles are located via package relationships, so Strict OOXML and non-standard part names work.
-  - `_xHHHH_` escapes are decoded and XML line endings are normalized.
-  - Empty `<v/>` reads as empty, and `-0` as `0`.
-  - Out-of-order cells land in the right column.
-  - Time-only values are no longer a day off, and datetimes keep millisecond precision.
-- **New:** `Date` cell values, hyperlinks (URLs and in-workbook locations), `autoFilter`, and an opt-in shared string table on write. Reading can return formulas (`formulas: true`, shared formulas expanded) and styles (`styles: true`).
-- **New:** rich text runs on write (`richText`) and read (`richText: true`); hyperlinks read back via `getMetadata()`; theme and indexed colours (with tints, and the workbook's own palette) resolved to ARGB when reading styles.
-- **New:** embedded PNG/JPEG/GIF images (`images` sheet option), anchored to a cell at their own size or stretched over a range. Format and size come from the file header; data shared between sheets is stored once. `getImages()` reads them back.
-- **Fixed:** `addSheet` accepted sheet names Excel refuses to open (over 31 characters, `\ / ? * : [ ]`, a leading or trailing apostrophe, or a duplicate name ignoring case). It now throws.
-- Low-level building blocks are exported for add-ons: the ZIP reader and writer, `resolveWorkbookParts`, `readSharedStrings`, and `mapFormulaRefs`/`shiftFormula` (A1 reference rewriting that understands sheet qualifiers).
-- The formula engine understands `$A$1` references and no longer logs to the console for formulas it cannot evaluate.
-- **New:** 1 GiB default size cap on in-memory parts when reading (zip-bomb guard).
-- **Fixed: files Excel would repair:** gradient fills were written as `<gradientStop>` (the element is `<stop>`), `vertical: 'middle'` was written verbatim (OOXML says `center`), and conditional formatting came after data validation (schema order is the other way round).
-- Fixed: `minValue`/`maxValue` on data bars were ignored; every conditional format had priority 1; colours and ranges were not XML-escaped.
-- Fixed: strings containing `_xHHHH_`, control characters or CR, or leading/trailing spaces, now survive a write/read round trip. `NaN`/`Infinity` are written as `#NUM!` instead of an invalid cell.
-- Test corpus: fixtures from openpyxl, ExcelJS, SheetJS, xlsx-populate, XlsxFlow, plus hand-crafted edge cases, checked against an openpyxl oracle. Also a fuzz suite for corrupted ZIPs and hostile XML.
+## Contributing and security
 
-### v1.0.0 (Official Release)
-> True O(1) Streaming Architecture for Writers & Editors
-
-- **O(1) Memory Streaming Writer & Editor**: Removed the in-memory buffers. `SheetWriter` and `SheetEditor` now use `ZipStreamWriter` via Data Descriptors (Bit 3) to generate dynamic ZIP archives entirely on-the-fly, so memory stays flat.
-- **Dynamic Date Deserialization**: Detection of `numFmtId` across workbooks to convert numeric epoch dates back into strict ISO-8601 strings during stream parsing.
-- **Data Descriptors & Signature Scanning**: Fixed limitations with forward-only zip stream parsers by scanning for Data Descriptor headers `0x08074b50`, so workbooks parse without seeking.
-
----
-
-### v0.3.0-beta
-> Multi-Sheet Support, Auto Date Deserialization, & Massive XML Parsing Optimization
-
-- **Multi-Sheet Writing**: You can now use `writer.addSheet()` multiple times to chain worksheets into a single exported `.xlsx` workbook.
-- **Dynamic XML Structuring**: The zip packer dynamically adjusts `[Content_Types].xml`, `workbook.xml`, and relationships files.
-- **Auto Date Deserialization**: `SheetReader` now pre-fetches `styles.xml` from the stream, parses `<cellXfs>` and `<numFmts>`, and heuristically identifies cells with date formats. Numeric Excel dates are returned as `ISO-8601` strings.
-- **Quadratic XML stream bug fixed**: Fixed a buffer accumulation bug that made parsing O(n²) in `xml-stream.ts`. Reading 1 Million cells now parses fully in under ~4 seconds (down from ~6.4s) while consuming <60MB of peak heap overhead.
-- **Portal App Update**: The interactive `/apps/portal` demo now dynamically exports workbooks containing 2 distinct sheets and verified Date cells.
-
----
-
-### v0.2.0-beta
-> Native Deflate Compression & Rich Text Support
-
-- **SheetWriter is now async**: `write()` returns `Promise<Uint8Array>`
-- **Native Deflate compression** via `CompressionStream('deflate-raw')`, no dependencies
-- **ZIP binary upgraded**: compression method `0x08`, correct uncompressed size & CRC-32 in headers
-- **File size reduction**: 1M cell file went from **30 MB → 2.9 MB** (90% smaller)
-- **Read speed improved**: parse time dropped from **~9.4s → 6.4s** (less I/O from smaller file)
-- **Rich Text / Inline String support**: `SheetReader` now parses `<t>` inside `<is>` and `<r>` elements
-- **Type fixes**: `@types/node` added, `TextDecoderStream` cast resolved
-- **ZIP backpressure deadlock** fixed with a background pump
-
-#### v0.2.0-beta vs v0.1.0-beta comparison
-
-| Metric | v0.1.0-beta | v0.2.0-beta | Delta |
-|---|---|---|---|
-| File size (1M cells) | 30 MB | 2.9 MB | **−90%** |
-| Write time | ~3,600 ms | ~3,900 ms | ~+8% (compression overhead) |
-| Read time | ~9,400 ms | ~6,400 ms | **−32%** (less disk I/O) |
-| ZIP compression | Store (none) | Deflate (native) | |
-| Write API | sync | async | |
-| Rich text cells | no | yes | |
-
----
-
-### v0.1.0-beta
-> Initial Release
-
-- Streaming SAX-style XLSX parser (`SheetReader`)
-- Zero-dependency XLSX writer (`SheetWriter`) with Store compression
-- ZIP stream parser built on native `TransformStream`
-- Shared String Table (`xl/sharedStrings.xml`) support
-- Pro tier architecture: `StyleEngine`, `FormulaEngine`, `ConditionalFormatter`
-- Dead-Drop license system (Zero-DB, hardware-bound, offline)
-- Next.js Portal (`apps/portal`) with interactive playground
-
----
+Bug reports and pull requests are welcome: see [CONTRIBUTING.md](https://github.com/xlsxflow/xlsxflow/blob/main/CONTRIBUTING.md). Report security issues privately as described in [SECURITY.md](https://github.com/xlsxflow/xlsxflow/blob/main/SECURITY.md).
 
 ## License
 
-`@xlsxflow/core` is licensed under the [MIT License](https://github.com/xlsxflow/xlsxflow/blob/main/packages/core/LICENSE). A commercial `@xlsxflow/pro` add-on is planned; it will be a separate package under its own license and never changes the terms of the core.
-
+[MIT](https://github.com/xlsxflow/xlsxflow/blob/main/packages/core/LICENSE). Pro is a separate package under its own licence and does not change the terms of the core.

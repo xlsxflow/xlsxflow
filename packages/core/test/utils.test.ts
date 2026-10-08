@@ -51,6 +51,15 @@ describe('DX Utilities', () => {
     expect(json[1]).toEqual({ ID: 2, Name: 'Bob', Active: false });
   });
 
+  it('sheetToJson takes the header from headerRowIndex', async () => {
+    const writer = new SheetWriter();
+    writer.addSheet('Data', [['Monthly report'], ['ID', 'Name'], [1, 'Alice']]);
+    const blob = new Blob([await streamToUint8Array(writer.write()) as BlobPart]);
+    const { SheetReader } = await import('../src/core/index');
+    const json = await sheetToJson(await new SheetReader().parse(createBlobReader(blob)), 1);
+    expect(json).toEqual([{ ID: 1, Name: 'Alice' }]);
+  });
+
   it('should export stream to CSV', async () => {
     const writer = new SheetWriter();
     writer.addSheet('Data', [
