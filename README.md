@@ -77,7 +77,9 @@ Dates come back as ISO-8601 strings. Opt in to more detail, each indexed like `r
 
 Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format. `await rows.getImages()` returns the sheet's pictures in the writer's `images` format too (bytes included, read on that call), so they can be written back unchanged. Charts and shapes are skipped. `await rows.getComments()` returns the sheet's notes as `{ ref, text, author? }`.
 
-Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB uncompressed each, to stop zip bombs. The streamed worksheet is uncapped. Change both with `maxUncompressedBytes` (`Infinity` disables).
+Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB uncompressed each, to stop zip bombs. The streamed worksheet is uncapped. Change both with `maxUncompressedBytes` (`Infinity` disables); `SheetEditor.edit(reader, { maxUncompressedBytes })` takes the same limit.
+
+**Reading files from untrusted users** (uploads on a server): set `maxUncompressedBytes` to what you expect, such as `50_000_000`. Corrupt or crafted ZIPs (overlapping entries, entries that inflate past their stated size, directories pointing outside the file) are rejected either way. The limit also bounds the empty cells added before far-right cells, since one tiny cell in column XFD pads its row to 16,384 values. Values are returned as written: hyperlinks may be `javascript:` URLs and text may start with `=`, so check them before putting them in a web page or a CSV that a spreadsheet will open.
 
 In Node.js, read straight from disk:
 
@@ -264,6 +266,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 - **New:** `{ formatted: true }` reports each cell's text as Excel shows it, from its number format.
 - **Tested:** `.xlsm` files keep their macros through `SheetEditor`.
 - **Tested:** runs in Cloudflare Workers without `nodejs_compat`; `scripts/workers` checks it.
+- **Security:** fixed crashes, hangs and memory blowups from crafted files: a ZIP directory pointing outside the file crashed Node; unclosed tags and elements made the parser quadratic; repeated hidden columns, far-right cells, fraction formats with long denominators and large style tables were slow or memory-hungry; one deflated entry could be read many times under different names. `SheetEditor.edit` takes `maxUncompressedBytes`. Option values typed as enums are now escaped, appended rows encode control characters, and `sheetToJson` keeps a `__proto__` header as an ordinary key.
 - **Corrected benchmarks:** the earlier ExcelJS write time (13.5 s) came from a cold first run; warm, it is 1.8 s. write-excel-file was listed as running out of memory, but the harness used its old API and never ran it. Failures are now reported as failures, not out-of-memory.
 - **New:** `SheetEditor.insertRows`, `deleteRows`, `insertColumns` and `deleteColumns` move cells in existing files, with every reference to them: formulas on all sheets, defined names, merges, conditional formats, validations, hyperlinks, filters, page breaks, column widths, tables, pictures, notes, sparklines, data tables, chart series and pivot sources.
 - **New:** `SheetEditor` restyles existing cells (`setCells` with `style`), adds sheets (`addSheet`) and deletes them (`deleteSheet`); `parseCsv` streams CSV rows, which `SheetWriter.addSheet` turns into xlsx; notes take formatted text runs.

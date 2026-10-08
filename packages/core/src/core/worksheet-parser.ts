@@ -1,5 +1,5 @@
 import { XmlToken } from './xml-stream';
-import { decodeXString, colIndex, shiftFormula, MAX_COLUMNS } from './utils';
+import { decodeXString, colIndex, shiftFormula, MAX_COLUMNS, unescapeXml, xmlElements } from './utils';
 import { applyFontElement, ColorResolver } from './style-reader';
 import { formatValue } from './number-format';
 import type { CellStyle, RichTextRun, SheetImage } from './types';
@@ -33,26 +33,22 @@ export interface SheetComment {
 
 // Notes from a comments part. Threaded comments (Excel 365) also write their text here.
 export function parseComments(xml: string): SheetComment[] {
-  const authors = [...xml.matchAll(/<(?:\w+:)?author>([\s\S]*?)<\/(?:\w+:)?author>|<(?:\w+:)?author\/>/g)].map(m => unescapeXml(m[1] ?? ''));
+  const authors = [...xmlElements(xml, 'author')].map(el => unescapeXml(el.body));
   const out: SheetComment[] = [];
-  for (const m of xml.matchAll(/<(?:\w+:)?comment\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?comment>/g)) {
-    const ref = /\sref="([^"]*)"/.exec(m[1])?.[1];
+  for (const el of xmlElements(xml, 'comment')) {
+    const ref = /\sref="([^"]*)"/.exec(el.attrs)?.[1];
     if (!ref) continue;
-    const body = m[2].replace(/<(?:\w+:)?rPh\b[\s\S]*?<\/(?:\w+:)?rPh>/g, '');
     let text = '';
-    for (const t of body.matchAll(/<(?:\w+:)?t\b[^>]*>([\s\S]*?)<\/(?:\w+:)?t>/g)) text += t[1];
+    // phonetic hints (rPh) hold their own <t>, which is not part of the note
+    for (const t of xmlElements(el.body, 't|rPh')) if (t.name === 't') text += t.body;
     const comment: SheetComment = { ref, text: decodeXString(unescapeXml(text)) };
-    const author = authors[parseInt(/\sauthorId="(\d+)"/.exec(m[1])?.[1] ?? '-1', 10)];
+    const author = authors[parseInt(/\sauthorId="(\d+)"/.exec(el.attrs)?.[1] ?? '-1', 10)];
     if (author) comment.author = author;
     out.push(comment);
   }
   return out;
 }
 
-const unescapeXml = (s: string) =>
-  s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (m, hex, dec, name) =>
-    hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(parseInt(dec, 10))
-      : ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[name] ?? m);
 
 export interface SheetMetadata {
   mergedCells: string[];
@@ -124,6 +120,7 @@ export interface WorksheetOptions {
   hyperlinkTargets?: Map<string, string>;  // relationship id -> URL
   images?: () => Promise<SheetImage[]>;
   comments?: () => Promise<SheetComment[]>;
+  maxPaddingCells?: number;                // empty cells added before far-right cells; the reader ties it to maxUncompressedBytes
 }
 
 export class ParseResult implements AsyncIterable<RowData> {
@@ -171,7 +168,8 @@ export function parseWorksheet(
   metadataPromise.catch(() => {});
   const mergedCells: string[] = [];
   const hiddenRows: number[] = [];
-  const hiddenCols: number[] = [];
+  const hiddenColMarks = new Uint8Array(MAX_COLUMNS + 1); // by column; repeated <col> ranges cost nothing extra
+  let padding = 0;
   const hyperlinks: SheetMetadata['hyperlinks'] = [];
   let freezePanes: SheetMetadata['freezePanes'] = undefined;
 
@@ -244,7 +242,7 @@ export function parseWorksheet(
                 // Clamp to the sheet's real width: a hostile max="999999999" must not allocate a billion entries
                 const min = Math.max(1, parseInt(token.attributes['min'] || '1', 10) || 1);
                 const max = Math.min(MAX_COLUMNS, parseInt(token.attributes['max'] || '0', 10) || 0);
-                for (let c = min; c <= max; c++) hiddenCols.push(c);
+                if (min <= max) hiddenColMarks.fill(1, min, max + 1);
               }
             } else if (token.name === 'c') {
               inCell = true;
@@ -259,6 +257,11 @@ export function parseWorksheet(
               currentCellCol = refCol >= 0 ? refCol : currentColIndex;
               if (currentCellCol >= MAX_COLUMNS) {
                 throw new Error(`Invalid cell reference "${r}": beyond the last column (XFD)`);
+              }
+              // A tiny cell at XFD pads its row to 16,384 cells, so padding counts against the byte limit
+              padding += Math.max(0, currentCellCol - currentRow.length);
+              if (padding > (options.maxPaddingCells ?? Infinity)) {
+                throw new Error(`Security Error: rows padded with more than ${options.maxPaddingCells} empty cells (maxUncompressedBytes).`);
               }
               while (currentRow.length < currentCellCol) currentRow.push(null);
             } else if (token.name === 'rPh') {
@@ -392,6 +395,8 @@ export function parseWorksheet(
           }
         }
       }
+      const hiddenCols: number[] = [];
+      hiddenColMarks.forEach((hidden, c) => { if (hidden) hiddenCols.push(c); });
       resolveMeta({ mergedCells, hiddenRows, hiddenCols, freezePanes, hyperlinks });
     } catch (e) {
       rejectMeta(e);

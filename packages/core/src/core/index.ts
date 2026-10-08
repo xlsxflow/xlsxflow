@@ -2,7 +2,7 @@ import { RandomAccessReader } from './random-access';
 import { ZipRandomAccessParser } from './zip-random-access';
 import { createXmlBatchParser, XmlToken } from './xml-stream';
 import { parseWorksheet, parseComments, ParseResult, RichTextCollector } from './worksheet-parser';
-import { resolveWorkbookParts, partRelationships, hyperlinkTargets, decodeXString, isDateFormatCode, attr, unescapeXml } from './utils';
+import { resolveWorkbookParts, partRelationships, hyperlinkTargets, decodeXString, isDateFormatCode, attr, unescapeXml, xmlElements } from './utils';
 import { parseThemeColors, colorResolver, applyFontElement, ColorResolver } from './style-reader';
 import { readSheetImages } from './image';
 import type { CellStyle, CellFont, CellFill, GradientFill, CellBorder, BorderSide, CellAlignment, RichTextRun, DefinedName, WorkbookProperties } from './types';
@@ -50,8 +50,8 @@ export interface WorkbookInfo {
 
 // Text of the first <tag> element in xml, unescaped
 const elementText = (xml: string, tag: string) => {
-  const m = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`).exec(xml);
-  return m ? unescapeXml(m[1]) : undefined;
+  for (const el of xmlElements(xml, tag)) return unescapeXml(el.body);
+  return undefined;
 };
 
 function createByteLimitStream(maxBytes: number): TransformStream<Uint8Array, Uint8Array> {
@@ -93,7 +93,7 @@ export class SheetReader {
       if (name !== null) sheets.push({ name: unescapeXml(name), state: state === 'hidden' || state === 'veryHidden' ? state : 'visible' });
     }
     const definedNames: DefinedName[] = [];
-    for (const [, , open, text] of parts.workbookXml.matchAll(/<((?:\w+:)?)definedName\b([^>]*)>([\s\S]*?)<\/\1definedName>/g)) {
+    for (const { attrs: open, body: text } of xmlElements(parts.workbookXml, 'definedName')) {
       const local = attr(open, 'localSheetId');
       const comment = attr(open, 'comment');
       const name: DefinedName = { name: unescapeXml(attr(open, 'name') ?? ''), ref: unescapeXml(text) };
@@ -178,6 +178,7 @@ export class SheetReader {
       richText: options?.richText ? color : undefined,
       sharedRichText,
       hyperlinkTargets: await hyperlinkTargets(readText, worksheetZipPath),
+      maxPaddingCells: options?.maxUncompressedBytes,
       comments: async () => {
         const rel = (await partRelationships(readText, worksheetZipPath)).find(r => !r.external && r.type.endsWith('/comments'));
         return rel ? parseComments(await readText(rel.path)) : [];
@@ -384,9 +385,10 @@ export class SheetReader {
       if (argb) set(argb);
     }
     // Colours that did not resolve (auto, unknown theme slot) are dropped; so is a solid fill without one
-    for (const f of fills) if (f?.type === 'solid' && !f.fgColor) fills[fills.indexOf(f)] = undefined;
+    fills.forEach((f, i) => { if (f?.type === 'solid' && !f.fgColor) fills[i] = undefined; });
     for (const f of fills) if (f?.type === 'gradient') f.stops = f.stops.filter(st => st.color);
-    for (const st of cellStyles) if (st?.fill && !fills.includes(st.fill)) delete st.fill;
+    const kept = new Set(fills);
+    for (const st of cellStyles) if (st?.fill && !kept.has(st.fill)) delete st.fill;
     // Default-looking styles report as no style
     return { cellStyles: cellStyles.map(st => (st && Object.keys(st).length ? st : undefined)), color, formats };
   }

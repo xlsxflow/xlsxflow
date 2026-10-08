@@ -9,8 +9,7 @@ import {
 } from './sheet-shift';
 import {
   resolveWorkbookParts, partRelationships, recalcOnOpen, attr, dirOf, relsPathOf, validateSheetName,
-  colIndex, colLetter, dateToSerial, MAX_ROWS, MAX_COLUMNS, encodeXString, shiftFormula, escapeXml, unescapeXml, escapeRe, type WorkbookParts,
-} from './utils';
+  colIndex, colLetter, dateToSerial, MAX_ROWS, MAX_COLUMNS, encodeXString, shiftFormula, escapeXml, unescapeXml, escapeRe, xmlElements, type WorkbookParts } from './utils';
 
 // A new cell value; null clears it. The object form sets a formula (leading "=" optional) or a value,
 // and can change the cell's style: only the style properties given change. With neither `value` nor
@@ -70,6 +69,10 @@ function rowsToEdits(name: string, rows: Row[]): EditedRows {
 
 const WORKSHEET_TYPE = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet';
 const WORKSHEET_CONTENT = 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml';
+
+// An element in the shape of a regex match: [whole, attributes, body], body undefined when self-closing
+const asMatch = (el: { whole: string; attrs: string; body: string }) =>
+  [el.whole, el.attrs, el.whole.endsWith('/>') ? undefined : el.body] as unknown as RegExpMatchArray;
 
 export class SheetEditor {
   private modifications = new Map<string, { rows: Row[], options: SheetOptions }>();
@@ -150,8 +153,15 @@ export class SheetEditor {
     return this;
   }
 
-  edit(reader: RandomAccessReader): ReadableStream<Uint8Array> {
+  // maxUncompressedBytes caps each part as the reader's option does: parts read whole default to 1 GiB,
+  // streamed worksheets are only capped when it is set
+  edit(reader: RandomAccessReader, options?: { maxUncompressedBytes?: number }): ReadableStream<Uint8Array> {
     const zipIn = new ZipRandomAccessParser(reader);
+    // Inflating is capped at each entry's stated size, so checking the stated size bounds the real one
+    const checkSize = (name: string, max: number) => {
+      const size = zipIn.getRecord(name).uncompressedSize;
+      if (size > max) throw new Error(`Security Error: ${name} is ${size} bytes uncompressed, over the limit of ${max}.`);
+    };
     const zipOut = new ZipStreamWriter();
 
     (async () => {
@@ -159,8 +169,11 @@ export class SheetEditor {
         await zipIn.parseCentralDirectory();
 
         // Resolve sheet paths up front via random access, independent of entry order.
-        const readText = async (name: string) =>
-          zipIn.has(name) ? this.readStreamToString(await zipIn.extractStream(name)) : '';
+        const readText = async (name: string) => {
+          if (!zipIn.has(name)) return '';
+          checkSize(name, options?.maxUncompressedBytes ?? 1024 ** 3);
+          return this.readStreamToString(await zipIn.extractStream(name));
+        };
         const parts = await resolveWorkbookParts(readText);
         // Parts rewritten whole, read back by later steps
         const overlay = new Map<string, string>();
@@ -276,7 +289,7 @@ export class SheetEditor {
           // A new sheet uses the workbook's namespace (Transitional or Strict)
           const root = /<((?:\w+:)?)workbook\b[^>]*>/.exec(await read(parts.workbookPath));
           const ns = (root && attr(root[0], root[1] ? `xmlns:${root[1].slice(0, -1)}` : 'xmlns')) ?? 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-          const empty = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="${ns}"><sheetData/></worksheet>`;
+          const empty = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="${escapeXml(ns)}"><sheetData/></worksheet>`;
           for (const [path, edits] of added) {
             await zipOut.addFile(path, encode(decode(new Response(empty).body!).pipeThrough(this.createEditTransform(edits, patcher))));
           }
@@ -288,6 +301,7 @@ export class SheetEditor {
           const edits = editsByPath.get(filename);
           const shift = shiftByPath.get(filename);
           if (rows || edits || shift !== undefined) {
+            checkSize(filename, options?.maxUncompressedBytes ?? Infinity);
             let text = decode(await zipIn.extractStream(filename));
             if (shift !== undefined) text = text.pipeThrough(createShiftTransform(shift, rowMaps));
             if (edits) text = text.pipeThrough(this.createEditTransform(edits, patcher));
@@ -318,6 +332,7 @@ export class SheetEditor {
     let buffer = '';
     let p = '';              // namespace prefix of the sheet's elements
     let state: 'head' | 'rows' | 'tail' = 'head';
+    let scanned = 0;         // buffer known to hold no </row> before here
     // Shared formulas whose anchor cell was overwritten: their other cells get the formula written out
     const sharedAnchors = new Map<string, { text: string; row: number; col: number }>();
     const brokenShared = new Set<string>();
@@ -356,12 +371,13 @@ export class SheetEditor {
       let changed = !!rowEdits;
       const cells: [number, string][] = [];
       let col = 0;
-      const re = new RegExp(`<${p}c\\b([^>]*?)(?:/>|>([\\s\\S]*?)</${p}c>)`, 'g');
-      for (const m of inner.matchAll(re)) {
+      for (const el of xmlElements(inner, 'c')) {
+        const m = asMatch(el);
         const ref = /\sr="([A-Za-z]+)\d+"/.exec(m[1]);
         col = ref ? colIndex(ref[1]) : col;
         const edit = rowEdits?.get(col);
-        const f = m[2] && new RegExp(`<${p}f\\b([^>]*?)(?:/>|>([\\s\\S]*?)</${p}f>)`).exec(m[2]);
+        const formula = m[2] && xmlElements(m[2], 'f').next().value;
+        const f = formula ? asMatch(formula) : undefined;
         const si = f && /\st="shared"/.test(f[1]) ? /\ssi="(\d+)"/.exec(f[1])?.[1] : undefined;
         let xml = m[0];
         const anchor = si !== undefined && f && f[2] !== undefined;
@@ -409,6 +425,14 @@ export class SheetEditor {
               state = 'rows';
             }
           } else if (state === 'rows') {
+            const gt = buffer.indexOf('>');
+            if (gt === -1) break;
+            const opening = buffer.slice(0, gt + 1);
+            if (!opening.endsWith('/>') && !opening.includes(`</${p}sheetData`)) {
+              const close = buffer.indexOf(`</${p}row>`, Math.max(gt, scanned));
+              if (close === -1) { scanned = Math.max(0, buffer.length - p.length - 6); break; }
+            }
+            scanned = 0;
             const m = new RegExp(`^\\s*(?:<${p}row\\b([^>]*?)(?:/>|>([\\s\\S]*?)</${p}row>)|</${p}sheetData>)`).exec(buffer);
             if (!m) break;
             if (m[0].trimStart().startsWith(`</${p}sheetData`)) {
@@ -453,7 +477,7 @@ export class SheetEditor {
         if (typeof val === 'boolean') return `<c r="${colRef}" t="b"><v>${val ? 1 : 0}</v></c>`;
         if (typeof val === 'number') return `<c r="${colRef}"><v>${val}</v></c>`;
         if (typeof val === 'string') {
-          return `<c r="${colRef}" t="inlineStr"><is><t>${escapeXml(val)}</t></is></c>`;
+          return `<c r="${colRef}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(encodeXString(val))}</t></is></c>`;
         }
         return `<c r="${colRef}"/>`;
       }).join('');

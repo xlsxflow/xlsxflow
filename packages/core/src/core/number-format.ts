@@ -14,7 +14,10 @@ export function formatValue(value: number | string | boolean | Date | null | und
   if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
   if (value instanceof Date) value = toSerial(value, date1904);
   let secs = cache.get(code);
-  if (!secs) cache.set(code, secs = splitSections(code.trim() ? code : 'General').map(parseSection));
+  if (!secs) {
+    if (cache.size >= 1000) cache.clear(); // codes come from files, so keep the cache bounded
+    cache.set(code, secs = splitSections(code.trim() ? code : 'General').map(parseSection));
+  }
   const text = secs.length === 4 ? secs[3] : secs[secs.length - 1].text ? secs[secs.length - 1] : undefined;
   if (typeof value === 'string') return text ? text.toks.map(t => t.t === 'text' ? value : t.v).join('') : value;
   if (!Number.isFinite(value)) return String(value);
@@ -237,13 +240,7 @@ function fraction(toks: Tok[], idx: number[], slash: number, x: number, out: str
   const f = x - whole;
   if (fixedDen) { d = fixedDen; n = Math.round(f * d); }
   else {
-    // best approximation within the denominator's digit count, smallest denominator on ties
-    d = 1; n = Math.round(f);
-    let err = Math.abs(f - n);
-    for (let q = 2, max = 10 ** denIdx.length - 1; q <= max && err; q++) {
-      const p = Math.round(f * q), e = Math.abs(f - p / q);
-      if (e < err - 1e-12) { n = p; d = q; err = e; }
-    }
+    [n, d] = bestFraction(f, 10 ** Math.min(denIdx.length, 15) - 1);
   }
   if (intIdx.length && n === d) { whole++; n = 0; }
 
@@ -257,6 +254,33 @@ function fraction(toks: Tok[], idx: number[], slash: number, x: number, out: str
   // a whole number blanks out the fraction but keeps its width
   if (intIdx.length && !n) for (let i = a; i < b; i++) out[i] = out[i].replace(/./g, ' ');
   return out.join('');
+}
+
+// Best approximation of f in [0, 1) with a denominator up to max, smallest denominator on ties.
+// Continued fractions keep this to a few dozen steps; trying every denominator hung on codes like # ?/??????????.
+export function bestFraction(f: number, max: number): [number, number] {
+  let n = Math.round(f), d = 1, err = Math.abs(f - n);
+  const consider = (p: number, q: number) => {
+    const e = Math.abs(f - p / q);
+    if (q >= 1 && q <= max && (e < err - 1e-12 || Math.abs(e - err) <= 1e-12 && q < d)) { n = p; d = q; err = e; }
+  };
+  let [p0, q0, p1, q1] = [0, 1, 1, 0];
+  let x = f;
+  for (let i = 0; i < 64 && err; i++) {
+    const a = Math.floor(x);
+    const [p2, q2] = [a * p1 + p0, a * q1 + q0];
+    if (q2 > max) {
+      // the best within max may be a semiconvergent between the last two convergents
+      const k = Math.floor((max - q0) / q1);
+      for (const j of [k, Math.ceil(a / 2)]) if (j >= 1 && j <= k) consider(j * p1 + p0, j * q1 + q0);
+      break;
+    }
+    consider(p2, q2);
+    [p0, q0, p1, q1] = [p1, q1, p2, q2];
+    if (x - a < 1e-15) break;
+    x = 1 / (x - a);
+  }
+  return [n, d];
 }
 
 // Calendar date for an integer serial: [year, month, day, weekday]

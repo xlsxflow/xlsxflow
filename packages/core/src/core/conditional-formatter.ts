@@ -1,12 +1,12 @@
 import { ConditionalFormat, DataBarRule, ColorScaleRule, ConditionalFormatRule, HighlightStyle } from './types';
 
-function escapeXml(val: string): string {
-  return val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function escapeXml(val: unknown): string {
+  return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 const color = (rgb: string) => `<color rgb="${escapeXml(rgb)}"/>`;
 const bound = (type: 'min' | 'max', value?: number) =>
-  value === undefined ? `<cfvo type="${type}"/>` : `<cfvo type="num" val="${value}"/>`;
+  value === undefined ? `<cfvo type="${type}"/>` : `<cfvo type="num" val="${escapeXml(value)}"/>`;
 const formula = (f: string | number) => `<formula>${escapeXml(String(f).replace(/^=/, ''))}</formula>`;
 // Excel string literal inside a formula
 const literal = (s: string) => `"${s.replace(/"/g, '""')}"`;
@@ -34,10 +34,10 @@ export class ConditionalFormatter {
       case 'dataBar': return `${head('dataBar')}${this.buildDataBar(rule)}</cfRule>`;
       case 'colorScale': return `${head('colorScale')}${this.buildColorScale(rule)}</cfRule>`;
       case 'cellIs':
-        return `${head('cellIs', ` operator="${rule.operator}"`)}${rule.formulae.map(formula).join('')}</cfRule>`;
+        return `${head('cellIs', ` operator="${escapeXml(rule.operator)}"`)}${rule.formulae.map(formula).join('')}</cfRule>`;
       case 'expression': return `${head('expression')}${formula(rule.formula)}</cfRule>`;
       case 'top10':
-        return `${head('top10', `${rule.percent ? ' percent="1"' : ''}${rule.bottom ? ' bottom="1"' : ''} rank="${rule.rank}"`)}</cfRule>`;
+        return `${head('top10', `${rule.percent ? ' percent="1"' : ''}${rule.bottom ? ' bottom="1"' : ''} rank="${escapeXml(rule.rank)}"`)}</cfRule>`;
       case 'aboveAverage': return `${head('aboveAverage', rule.below ? ' aboveAverage="0"' : '')}</cfRule>`;
       case 'duplicateValues':
       case 'uniqueValues': return `${head(rule.type)}</cfRule>`;
@@ -60,7 +60,7 @@ export class ConditionalFormatter {
         const n = parseInt(rule.iconSet, 10);
         const cfvos = Array.from({ length: n }, (_, k) => `<cfvo type="percent" val="${Math.round(k * 100 / n)}"/>`).join('');
         const attrs = `${rule.reverse ? ' reverse="1"' : ''}${rule.showValue === false ? ' showValue="0"' : ''}`;
-        return `${head('iconSet')}<iconSet iconSet="${rule.iconSet}"${attrs}>${cfvos}</iconSet></cfRule>`;
+        return `${head('iconSet')}<iconSet iconSet="${escapeXml(rule.iconSet)}"${attrs}>${cfvos}</iconSet></cfRule>`;
       }
       default:
         throw new Error(`Unknown conditional format type "${(rule as { type: string }).type}".`);

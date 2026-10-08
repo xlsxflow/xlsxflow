@@ -5,11 +5,19 @@ export interface RandomAccessReader {
   close(): Promise<void>;
 }
 
+// Offsets come from the file itself, so a corrupt one must fail here, not allocate or crash
+function checkRange(offset: number, length: number, size: number) {
+  if (!(offset >= 0 && length >= 0 && offset + length <= size)) {
+    throw new Error(`Corrupt ZIP: read of ${length} bytes at ${offset} is outside the ${size}-byte file`);
+  }
+}
+
 // Built-in adapter for Web Blob/File
 export function createBlobReader(blob: Blob): RandomAccessReader {
   return {
     size: blob.size,
     async read(offset: number, length: number): Promise<Uint8Array> {
+      checkRange(offset, length, blob.size);
       const slice = blob.slice(offset, offset + length);
       return new Uint8Array(await slice.arrayBuffer());
     },
@@ -33,6 +41,7 @@ export async function createFileReader(filePath: string): Promise<RandomAccessRe
   return {
     size: stat.size,
     async read(offset: number, length: number): Promise<Uint8Array> {
+      checkRange(offset, length, stat.size);
       const buffer = new Uint8Array(length);
       let filled = 0;
       while (filled < length) {

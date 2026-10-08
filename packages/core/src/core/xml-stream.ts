@@ -146,14 +146,7 @@ export function createXmlBatchParser(): TransformStream<Uint8Array, XmlToken[]> 
           const name = stripNamespace(ws === -1 ? content : content.slice(0, ws));
           const attributes: Record<string, string> = {};
 
-          if (ws !== -1) {
-            const attrRegex = /([a-zA-Z0-9_:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-            let match;
-            while ((match = attrRegex.exec(content)) !== null) {
-              const val = match[2] !== undefined ? match[2] : match[3];
-              attributes[stripNamespace(match[1])] = unescapeXml(normalizeEol(val));
-            }
-          }
+          if (ws !== -1) readAttributes(content, ws, attributes);
 
           out.push({ type: 'startElement', name, attributes });
           if (isSelfClosing) out.push({ type: 'endElement', name });
@@ -171,6 +164,28 @@ export function createXmlBatchParser(): TransformStream<Uint8Array, XmlToken[]> 
       }
     }
   });
+}
+
+// name="value" pairs from i on, in one pass: a regex here backtracks quadratically on junk like <c aaaa…>
+const isSpace = (c: string) => c === ' ' || c === '\n' || c === '\t' || c === '\r';
+function readAttributes(s: string, i: number, attributes: Record<string, string>) {
+  const n = s.length;
+  while (i < n) {
+    while (i < n && isSpace(s[i])) i++;
+    const start = i;
+    while (i < n && !isSpace(s[i]) && s[i] !== '=') i++;
+    const name = s.slice(start, i);
+    while (i < n && isSpace(s[i])) i++;
+    if (s[i] !== '=') { if (i === start) i++; continue; }
+    i++;
+    while (i < n && isSpace(s[i])) i++;
+    const quote = s[i];
+    if (quote !== '"' && quote !== "'") continue;
+    const end = s.indexOf(quote, i + 1);
+    if (end === -1) return;
+    if (/^[a-zA-Z0-9_:.-]+$/.test(name)) attributes[stripNamespace(name)] = unescapeXml(normalizeEol(s.slice(i + 1, end)));
+    i = end + 1;
+  }
 }
 
 // Token-at-a-time view of createXmlBatchParser, kept for API compatibility.

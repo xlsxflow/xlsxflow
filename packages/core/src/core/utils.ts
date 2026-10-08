@@ -16,7 +16,10 @@ export async function sheetToJson<T = Record<string, CellValue>>(
 
     const obj: any = {};
     for (let i = 0; i < headers.length; i++) {
-      obj[headers[i]] = row.cells[i] ?? null;
+      const value = row.cells[i] ?? null;
+      // A "__proto__" header must be an ordinary key, not a prototype change
+      if (headers[i] === '__proto__') Object.defineProperty(obj, '__proto__', { value, enumerable: true, writable: true, configurable: true });
+      else obj[headers[i]] = value;
     }
     results.push(obj as T);
   }
@@ -45,11 +48,7 @@ export async function streamToCsv(parseResult: ParseResult): Promise<string> {
 export function attr(tag: string, name: string): string | null {
   const m = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`).exec(tag);
   if (!m) return null;
-  return (m[1] ?? m[2])
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
-    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  return unescapeXml(m[1] ?? m[2]);
 }
 
 // Resolves a relationship Target against the directory of the part that owns the .rels file.
@@ -309,7 +308,33 @@ export function validateSheetName(name: string, existing: Iterable<string>): voi
 export const escapeXml = (val: string) =>
   val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 export const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Out-of-range references (&#x110000;) stay as written instead of throwing
+const fromCodePoint = (cp: number, m: string) => (cp <= 0x10ffff ? String.fromCodePoint(cp) : m);
 export const unescapeXml = (s: string) =>
   s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (m, hex, dec, name) =>
-    hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(parseInt(dec, 10))
+    hex ? fromCodePoint(parseInt(hex, 16), m) : dec ? fromCodePoint(parseInt(dec, 10), m)
       : ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[name] ?? m);
+
+// Elements named by `names` (an alternation such as 'comment' or 'a|b'), any prefix, in document order.
+// One pass with indexOf: lazy regexes like <x>[\s\S]*?</x> restart at every opener and turn quadratic
+// when the closing tag is missing. Same-name nesting is not supported; an unclosed element ends the scan.
+export function* xmlElements(xml: string, names: string): Generator<{ name: string; attrs: string; body: string; whole: string }> {
+  const opener = new RegExp(`<(\\w+:)?(${names})(?=[\\s/>])`, 'y');
+  for (let i = xml.indexOf('<'); i !== -1; i = xml.indexOf('<', i)) {
+    opener.lastIndex = i;
+    const m = opener.exec(xml);
+    if (!m) { i++; continue; }
+    const gt = xml.indexOf('>', opener.lastIndex);
+    if (gt === -1) return;
+    if (xml[gt - 1] === '/') {
+      yield { name: m[2], attrs: xml.slice(opener.lastIndex, gt - 1), body: '', whole: xml.slice(i, gt + 1) };
+      i = gt + 1;
+      continue;
+    }
+    const close = `</${m[1] ?? ''}${m[2]}>`;
+    const end = xml.indexOf(close, gt);
+    if (end === -1) return;
+    yield { name: m[2], attrs: xml.slice(opener.lastIndex, gt), body: xml.slice(gt + 1, end), whole: xml.slice(i, end + close.length) };
+    i = end + close.length;
+  }
+}

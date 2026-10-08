@@ -1,5 +1,5 @@
 import type { SheetImage } from './types';
-import { colIndex, colLetter, partRelationships } from './utils';
+import { colIndex, colLetter, partRelationships, unescapeXml, xmlElements } from './utils';
 
 const EMU_PER_PX = 9525;
 
@@ -45,8 +45,8 @@ export async function readSheetImages(
     if (rel.external || !rel.type.endsWith('/drawing')) continue;
     const xml = await readText(rel.path);
     const targets = new Map((await partRelationships(readText, rel.path)).filter(r => !r.external).map(r => [r.id, r.path]));
-    for (const [anchor, kind] of xml.matchAll(/<(?:\w+:)?(twoCellAnchor|oneCellAnchor)\b[\s\S]*?<\/(?:\w+:)?\1>/g)) {
-      const pic = /<(?:\w+:)?pic\b[\s\S]*?<\/(?:\w+:)?pic>/.exec(anchor)?.[0];
+    for (const { whole: anchor, name: kind } of xmlElements(xml, 'twoCellAnchor|oneCellAnchor')) {
+      const pic = xmlElements(anchor, 'pic').next().value?.whole;
       const embed = pic && /<(?:\w+:)?blip\b[^>]*?\s(?:\w+:)?embed="([^"]*)"/.exec(pic)?.[1];
       const path = embed && targets.get(embed);
       if (!path) continue;
@@ -80,10 +80,6 @@ export async function readSheetImages(
   return images;
 }
 
-const unescapeXml = (s: string) =>
-  s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|(amp|lt|gt|quot|apos));/g, (m, hex, dec, name) =>
-    hex ? String.fromCodePoint(parseInt(hex, 16)) : dec ? String.fromCodePoint(parseInt(dec, 10))
-      : ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[name] ?? m);
 
 const escapeXml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

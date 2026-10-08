@@ -1,7 +1,7 @@
 import { CellStyle, CellFont, CellFill, GradientFill, CellBorder, CellAlignment, HighlightStyle } from './types';
 
-function escapeXml(val: string): string {
-  return val.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+function escapeXml(val: unknown): string {
+  return String(val).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // Child elements of a <font> (styles) or, with nameTag "rFont", of a rich text run's <rPr>
@@ -10,14 +10,14 @@ export function fontXml(font: CellFont, nameTag = 'name'): string {
   if (font.bold) xml += '<b/>';
   if (font.italic) xml += '<i/>';
   if (font.underline) xml += '<u/>';
-  if (font.size) xml += `<sz val="${font.size}"/>`;
+  if (font.size) xml += `<sz val="${escapeXml(font.size)}"/>`;
   if (font.color) xml += `<color rgb="${escapeXml(font.color)}"/>`;
   if (font.name) xml += `<${nameTag} val="${escapeXml(font.name)}"/>`;
   return xml;
 }
 
 export const borderSideXml = (tag: string, s?: { style: string; color?: string }) =>
-  s ? `<${tag} style="${s.style}">${s.color ? `<color rgb="${escapeXml(s.color)}"/>` : ''}</${tag}>` : `<${tag}/>`;
+  s ? `<${tag} style="${escapeXml(s.style)}">${s.color ? `<color rgb="${escapeXml(s.color)}"/>` : ''}</${tag}>` : `<${tag}/>`;
 
 export function borderXml(b: CellBorder): string {
   const side = borderSideXml;
@@ -27,7 +27,7 @@ export function borderXml(b: CellBorder): string {
 export function fillXml(fill: CellFill | GradientFill): string {
   if (fill.type === 'gradient') {
     const stops = fill.stops.map(s => `<stop position="${s.position}"><color rgb="${escapeXml(s.color)}"/></stop>`).join('');
-    return `<fill><gradientFill degree="${fill.degree ?? 0}">${stops}</gradientFill></fill>`;
+    return `<fill><gradientFill degree="${escapeXml(fill.degree ?? 0)}">${stops}</gradientFill></fill>`;
   }
   return `<fill><patternFill patternType="solid"><fgColor rgb="${escapeXml(fill.fgColor)}"/></patternFill></fill>`;
 }
@@ -35,9 +35,9 @@ export function fillXml(fill: CellFill | GradientFill): string {
 // Attributes of an <alignment> element
 export function alignmentAttrs(alignment: CellAlignment): Record<string, string> {
   const attrs: Record<string, string> = {};
-  if (alignment.horizontal) attrs.horizontal = alignment.horizontal;
+  if (alignment.horizontal) attrs.horizontal = escapeXml(alignment.horizontal);
   // OOXML has no "middle"; Excel repairs the file if it sees one
-  if (alignment.vertical) attrs.vertical = alignment.vertical === 'middle' ? 'center' : alignment.vertical;
+  if (alignment.vertical) attrs.vertical = alignment.vertical === 'middle' ? 'center' : escapeXml(alignment.vertical);
   if (alignment.wrapText) attrs.wrapText = '1';
   return attrs;
 }

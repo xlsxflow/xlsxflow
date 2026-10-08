@@ -6,8 +6,8 @@ import { ZipStreamWriter } from './zip-stream-writer';
 import { encodeXString, colLetter, colIndex, dateToSerial, validateSheetName } from './utils';
 import { imageInfo, drawingXml, type ImageInfo } from './image';
 
-function escapeXml(val: string): string {
-  return val
+function escapeXml(val: unknown): string {
+  return String(val)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -298,12 +298,12 @@ export class SheetWriter {
       const c = options.columns?.[i] ?? {};
       const width = c.width ?? options.columnWidths?.[i];
       if (width === undefined && !c.hidden && !c.outlineLevel) continue;
-      colWidths += `<col min="${i + 1}" max="${i + 1}"${width !== undefined ? ` width="${width}" customWidth="1"` : ''}` +
-        `${c.hidden ? ' hidden="1"' : ''}${c.outlineLevel ? ` outlineLevel="${c.outlineLevel}"` : ''}/>`;
+      colWidths += `<col min="${i + 1}" max="${i + 1}"${width !== undefined ? ` width="${escapeXml(width)}" customWidth="1"` : ''}` +
+        `${c.hidden ? ' hidden="1"' : ''}${c.outlineLevel ? ` outlineLevel="${escapeXml(c.outlineLevel)}"` : ''}/>`;
     }
     const rowOptions = Object.entries(options.rows ?? {}).map(([r, o]) => [parseInt(r, 10), o] as const).sort((a, b) => a[0] - b[0]);
     const rowAttrs = new Map(rowOptions.map(([r, o]) =>
-      [r, `${o.height !== undefined ? ` ht="${o.height}" customHeight="1"` : ''}${o.hidden ? ' hidden="1"' : ''}${o.outlineLevel ? ` outlineLevel="${o.outlineLevel}"` : ''}`]));
+      [r, `${o.height !== undefined ? ` ht="${escapeXml(o.height)}" customHeight="1"` : ''}${o.hidden ? ' hidden="1"' : ''}${o.outlineLevel ? ` outlineLevel="${escapeXml(o.outlineLevel)}"` : ''}`]));
     let nextRowOption = 0;
     // Rows that only exist for their options (height, hidden, outline) and hold no cells
     const optionRowsBefore = (limit: number) => {
@@ -463,11 +463,11 @@ export class SheetWriter {
     if (options.dataValidations && options.dataValidations.length > 0) {
       const dvs = options.dataValidations.map(dv => {
         let attr = `sqref="${escapeXml(dv.sqref)}"`;
-        if (dv.type) attr += ` type="${dv.type}"`;
+        if (dv.type) attr += ` type="${escapeXml(dv.type)}"`;
         if (dv.allowBlank !== undefined) attr += ` allowBlank="${dv.allowBlank ? 1 : 0}"`;
         if (dv.showInputMessage !== undefined) attr += ` showInputMessage="${dv.showInputMessage ? 1 : 0}"`;
-        if (dv.errorStyle) attr += ` errorStyle="${dv.errorStyle}"`;
-        if (dv.operator) attr += ` operator="${dv.operator}"`;
+        if (dv.errorStyle) attr += ` errorStyle="${escapeXml(dv.errorStyle)}"`;
+        if (dv.operator) attr += ` operator="${escapeXml(dv.operator)}"`;
         if (dv.showErrorMessage !== undefined || dv.error) attr += ` showErrorMessage="${dv.showErrorMessage ?? true ? 1 : 0}"`;
         if (dv.prompt && dv.showInputMessage === undefined) attr += ' showInputMessage="1"';
         for (const k of ['errorTitle', 'error', 'promptTitle', 'prompt'] as const) {
@@ -618,13 +618,14 @@ function pageSetupXml(page?: PageSetup): string {
   }
   // Excel's "Normal" margins, in inches; all six are required
   const m = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3, ...page.margins };
-  xml += `  <pageMargins left="${m.left}" right="${m.right}" top="${m.top}" bottom="${m.bottom}" header="${m.header}" footer="${m.footer}"/>\n`;
+  const e = escapeXml;
+  xml += `  <pageMargins left="${e(m.left)}" right="${e(m.right)}" top="${e(m.top)}" bottom="${e(m.bottom)}" header="${e(m.header)}" footer="${e(m.footer)}"/>\n`;
   const attrs = [
-    page.paperSize !== undefined && `paperSize="${page.paperSize}"`,
-    page.scale !== undefined && `scale="${page.scale}"`,
-    page.fitToWidth !== undefined && `fitToWidth="${page.fitToWidth}"`,
-    page.fitToHeight !== undefined && `fitToHeight="${page.fitToHeight}"`,
-    page.orientation && `orientation="${page.orientation}"`,
+    page.paperSize !== undefined && `paperSize="${e(page.paperSize)}"`,
+    page.scale !== undefined && `scale="${e(page.scale)}"`,
+    page.fitToWidth !== undefined && `fitToWidth="${e(page.fitToWidth)}"`,
+    page.fitToHeight !== undefined && `fitToHeight="${e(page.fitToHeight)}"`,
+    page.orientation && `orientation="${e(page.orientation)}"`,
   ].filter(Boolean).join(' ');
   if (attrs) xml += `  <pageSetup ${attrs}/>\n`;
   if (page.header || page.footer) {

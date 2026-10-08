@@ -45,6 +45,10 @@ export class ZipRandomAccessParser {
       throw new Error("ZIP64 archives are not supported.");
     }
 
+    if (cdOffset + cdSize > searchStart + eocdOffset || cdSize < 46 * totalRecords) {
+      throw new Error("Corrupt ZIP: the central directory is outside the file or too small for its records.");
+    }
+
     // Read the Central Directory
     const cdBuffer = await this.reader.read(cdOffset, cdSize);
     const cdView = new DataView(cdBuffer.buffer, cdBuffer.byteOffset, cdBuffer.byteLength);
@@ -53,7 +57,7 @@ export class ZipRandomAccessParser {
     const textDecoder = new TextDecoder();
 
     for (let i = 0; i < totalRecords; i++) {
-      if (cdView.getUint32(offset, true) !== 0x02014b50) {
+      if (offset + 46 > cdBuffer.length || cdView.getUint32(offset, true) !== 0x02014b50) {
         throw new Error(`Central Directory record signature mismatch at index ${i}`);
       }
 
@@ -66,6 +70,9 @@ export class ZipRandomAccessParser {
       const fileCommentLength = cdView.getUint16(offset + 32, true);
       const localHeaderOffset = cdView.getUint32(offset + 42, true);
 
+      if (offset + 46 + filenameLength > cdBuffer.length) {
+        throw new Error(`Corrupt ZIP: central directory record ${i} runs past the directory`);
+      }
       const filenameBuffer = cdBuffer.subarray(offset + 46, offset + 46 + filenameLength);
       const filename = textDecoder.decode(filenameBuffer);
 
@@ -83,6 +90,15 @@ export class ZipRandomAccessParser {
       });
 
       offset += 46 + filenameLength + extraFieldLength + fileCommentLength;
+    }
+
+    // Entries must not share bytes: aliased names would let one small deflated entry be inflated many times
+    const byOffset = [...this.records.values()].sort((a, b) => a.localHeaderOffset - b.localHeaderOffset);
+    for (let i = 1; i < byOffset.length; i++) {
+      const prev = byOffset[i - 1];
+      if (prev.localHeaderOffset + 30 + prev.compressedSize > byOffset[i].localHeaderOffset) {
+        throw new Error(`Corrupt ZIP: entries ${prev.filename} and ${byOffset[i].filename} overlap`);
+      }
     }
   }
 
@@ -133,12 +149,19 @@ export class ZipRandomAccessParser {
 
     // Node reports bad deflate data as a bare TypeError; name the entry instead
     const inflated = stream.pipeThrough(new DecompressionStream('deflate-raw') as any as TransformStream<Uint8Array, Uint8Array>).getReader();
+    let total = 0;
     return new ReadableStream<Uint8Array>({
       async pull(controller) {
         try {
           const { done, value } = await inflated.read();
-          if (done) controller.close();
-          else controller.enqueue(value);
+          if (done) return controller.close();
+          // The directory states each entry's size; inflating past it means a crafted entry (a zip bomb)
+          total += value.length;
+          if (total > record.uncompressedSize) {
+            await inflated.cancel();
+            return controller.error(new Error(`Corrupt ZIP entry ${filename}: inflates past its stated size of ${record.uncompressedSize} bytes`));
+          }
+          controller.enqueue(value);
         } catch (err: any) {
           const detail = err?.cause?.message || err?.message || String(err);
           controller.error(new Error(`Corrupt ZIP entry ${filename}: ${detail}`, { cause: err }));
