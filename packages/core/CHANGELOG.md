@@ -9,6 +9,9 @@
 - `SheetEditor.insertRows`, `deleteRows`, `insertColumns` and `deleteColumns`. Everything that points at the moved cells moves with them: formulas on all sheets, defined names, merges, conditional formats, validations, hyperlinks, filters, page breaks, column widths, tables, pictures, notes, sparklines, data tables, chart series and pivot sources.
 - `SheetEditor.setCells` edits and restyles cells of existing files; `addSheet` and `deleteSheet` add and remove sheets.
 - `parseCsv` streams CSV rows, which `SheetWriter.addSheet` turns into a sheet.
+- `SheetReader` reads Excel 97-2003 `.xls` files and OpenDocument `.ods` files: values, dates, formula results, merges, hidden rows, columns and sheets, frozen panes, defined names and document properties. `.ods` also gives formulas, hyperlinks and notes.
+- `OdsWriter` writes `.ods` files: values, dates, formulas, merges, column widths, frozen panes and hidden sheets.
+- Password-protected `.xlsx` files are rejected with an error that points to `decryptWorkbook` in `@xlsxflow/pro`, instead of a ZIP error.
 - Cell notes on write (plain or formatted text) and `getComments()` on read.
 - Conditional formats `cellIs`, `expression`, `top10`, `aboveAverage`, text rules, `duplicateValues`/`uniqueValues` and `iconSet`.
 - Excel tables, sheet protection, page setup (margins, header and footer, print area and titles), row heights, hidden rows and columns, outline grouping, tab colour, and validation operators and messages.
@@ -53,6 +56,7 @@ Also:
   - empty `<v/>` reads as empty and `-0` as `0`;
   - out-of-order cells land in the right column;
   - time-only values are no longer a day off, and datetimes keep milliseconds.
+  - frozen panes saved by Excel as `frozenSplit` (frozen after a split) are reported.
 - `sheetToJson` ignored its `headerRowIndex` argument.
 
 ### Changed

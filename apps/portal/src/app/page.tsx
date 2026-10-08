@@ -89,8 +89,8 @@ export default function Home() {
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
     if (!file) return;
-    if (/\.xls[xm]$/i.test(file.name)) parseFile(file);
-    else { setFileName(file.name); setRows([]); setParseError("Only .xlsx and .xlsm files can be read here."); }
+    if (/\.(xls[xm]?|ods)$/i.test(file.name)) parseFile(file);
+    else { setFileName(file.name); setRows([]); setParseError("Only .xlsx, .xlsm, .xls and .ods files can be read here."); }
   }, [parseFile]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -189,11 +189,13 @@ export default function Home() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col gap-4 text-sm text-slate-300">
             <p>
               <span className="font-semibold text-white">@xlsxflow/core</span> is free and MIT licensed: read, write and edit
-              .xlsx and .xlsm files with styles, formulas, images, tables and notes.
+              .xlsx and .xlsm files with styles, formulas, images, tables and notes. It also reads .xls and .ods files,
+              and writes .ods.
             </p>
             <p>
-              <span className="font-semibold text-white">@xlsxflow/pro</span> adds two things: filling Excel templates with data,
-              repeating rows for lists, and adding column, bar, line, area and pie charts.
+              <span className="font-semibold text-white">@xlsxflow/pro</span> adds filling Excel templates with data, repeating
+              rows for lists; column, bar, line, area and pie charts; pivot tables; and opening and saving password-protected
+              .xlsx files.
             </p>
             <ul className="list-disc pl-5 text-slate-400 flex flex-col gap-1">
               <li>$5 per developer, with local pricing at checkout.</li>
@@ -271,14 +273,14 @@ export default function Home() {
                 ? 'border-cyan-400 bg-cyan-500/10 scale-[1.02]'
                 : 'border-slate-700 bg-slate-900 hover:border-slate-500 hover:bg-slate-900/80'}`}
           >
-            <input ref={fileInputRef} type="file" accept=".xlsx,.xlsm" className="hidden" onChange={handleFileChange} />
+            <input ref={fileInputRef} type="file" accept=".xlsx,.xlsm,.xls,.ods" className="hidden" onChange={handleFileChange} />
             <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-all ${isDragging ? 'bg-cyan-500/20' : 'bg-slate-800'}`}>
               <svg className={`w-7 h-7 transition-colors ${isDragging ? 'text-cyan-400' : 'text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
               </svg>
             </div>
             <div>
-              <p className="font-semibold text-slate-200">Drop an .xlsx file here</p>
+              <p className="font-semibold text-slate-200">Drop an .xlsx, .xls or .ods file here</p>
               <p className="text-slate-500 text-sm mt-1">Or click to browse. The file is read in your browser and never uploaded.</p>
             </div>
             {isParsing && (

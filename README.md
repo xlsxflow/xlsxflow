@@ -3,7 +3,7 @@
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/xlsxflow/xlsxflow/main/assets/logo-wordmark-dark.svg" />
     <img src="https://raw.githubusercontent.com/xlsxflow/xlsxflow/main/assets/logo-wordmark.svg" alt="XlsxFlow" width="320" />
   </picture>
-  <p><strong>Streaming .xlsx reader, writer and editor for JavaScript.</strong></p>
+  <p><strong>Streaming .xlsx reader, writer and editor for JavaScript. Also reads .xls and .ods, and writes .ods.</strong></p>
   
   [![npm version](https://img.shields.io/npm/v/@xlsxflow/core.svg?style=flat-square)](https://www.npmjs.com/package/@xlsxflow/core)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
@@ -13,6 +13,7 @@
     <a href="#installation">Installation</a> •
     <a href="#quick-start">Quick Start</a> •
     <a href="#styles-formulas--conditional-formats">Styles &amp; Formulas</a> •
+    <a href="#compared-with-sheetjs-and-exceljs">Comparison</a> •
     <a href="#benchmarks">Benchmarks</a> •
     <a href="#free-and-pro">Free and Pro</a>
   </p>
@@ -31,6 +32,7 @@ Rows are read and written one at a time instead of loading the whole workbook, s
 - **Runs anywhere with Web APIs**: tested on Node 20.12+, Bun, browsers and Cloudflare Workers (without `nodejs_compat`). Deno provides the same APIs but is not tested yet.
 - **Read, write and edit**: stream rows out of a file, generate one on the fly, or change cells, rows, columns and sheets of an existing file while keeping everything else in it.
 - **Styles and formulas**: fonts, fills, borders, alignment, number formats, conditional formats, validations, tables, notes, hyperlinks, autofilters, images, protection and page setup. Formulas and styles read back too.
+- **Older and open formats**: the same reader opens Excel 97-2003 `.xls` files and OpenDocument `.ods` files, and `OdsWriter` writes `.ods`.
 
 ## Installation
 
@@ -140,6 +142,33 @@ const xlsx = new SheetWriter().addSheet('Data', parseCsv(csvStream)).write();
 
 Quoted fields can hold delimiters, line breaks and `""`. Unquoted numbers and `TRUE`/`FALSE` become numbers and booleans, and empty fields become empty cells; `{ convert: false }` keeps everything as text, and `{ delimiter: ';' }` sets the delimiter. Dates stay text, since CSV files do not say which date order they use.
 
+### .xls and .ods Files
+
+`SheetReader` tells the format from the file's contents, so `parse` and `readWorkbook` work the same on `.xls`
+(Excel 97-2003) and `.ods` (LibreOffice, Google Sheets, Excel's OpenDocument export) as on `.xlsx`:
+values, dates, formula results, merged cells, hidden rows, columns and sheets, frozen panes, defined names
+and document properties. `formatted: true` works on both; `formulas: true` works on `.ods`.
+
+- `.xls` files are read whole into memory (capped by `maxUncompressedBytes`, 1 GiB by default). Formula text,
+  styles, hyperlinks and notes are not read from them, and files older than Excel 97 (BIFF5 and earlier) are
+  not supported.
+- `.ods` files stream like `.xlsx`. Hyperlinks and notes are read too; `formatted` returns the text the file
+  stores for each cell.
+- A file saved with a password is rejected with an error that points to `decryptWorkbook` in
+  [`@xlsxflow/pro`](#free-and-pro).
+
+`OdsWriter` writes `.ods` with the same rows as `SheetWriter`: values, dates, formulas (converted to
+OpenFormula), merged cells, column widths, frozen panes, hidden sheets and document properties. Cell styles,
+hyperlinks, notes and images are not written to `.ods`.
+
+```typescript
+import { OdsWriter } from '@xlsxflow/core';
+
+const ods = new OdsWriter({ properties: { title: 'Report' } })
+  .addSheet('Data', rows, { columnWidths: [20, 10], freezePanes: { row: 1 } })
+  .write(); // ReadableStream<Uint8Array>
+```
+
 ### Editing an Existing File
 
 ```typescript
@@ -223,6 +252,27 @@ Formulas are stored for Excel to calculate when it opens the file. For array row
 
 Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when values repeat, but the distinct strings stay in memory until the file is finished.
 
+## Compared with SheetJS and ExcelJS
+
+Checked against each project's own documentation on 8 October 2026. "Pro" means a paid add-on.
+
+| | XlsxFlow | SheetJS Community Edition | ExcelJS 4.4 |
+|---|---|---|---|
+| Streaming `.xlsx` read and write | Yes | No (streams CSV, HTML and JSON out) | Yes |
+| Cell styles, read and write | Yes | No (SheetJS Pro) | Yes |
+| Images | Yes | No | Yes |
+| `.xls` | Read | Read and write | No |
+| `.ods` | Read and write | Read and write | No |
+| `.xlsb`, `.numbers` and other formats | No | Yes | No |
+| Charts | Add (Pro) | No (SheetJS Pro) | No |
+| Pivot tables | Add (Pro) | No (SheetJS Pro) | Partial, undocumented |
+| Password-protected files | Open and save (Pro) | Old `.xls` obfuscation only (SheetJS Pro opens AES files) | No |
+| Licence | MIT, Pro is paid | Apache 2.0 | MIT |
+
+SheetJS reads and writes far more formats, and ExcelJS has a longer track record (its last release was in
+October 2023). XlsxFlow focuses on `.xlsx`: streaming in flat memory, keeping everything in a file it edits,
+and running on Web APIs alone.
+
 ## Benchmarks
 
 Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 rows (10M cells). Each library ran in its own process on Node v25.8.2 with a 4 GB heap limit, and "Heap" is the growth in heap usage. Times are from one run on a laptop with other apps open; runs on that machine varied by up to 2×, so treat differences under about 20% as a tie. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`). `BENCH_ROWS=1000000` runs 10M cells, `BENCH_LIBS=xlsxflow,exceljs` runs a subset, and a library still writing after `BENCH_TIMEOUT_MIN` minutes (default 10) is stopped. The 10M runs for SheetJS and excel4node used a 30-minute limit.
@@ -271,8 +321,11 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 | | Core (free) | Pro |
 |---|---|---|
 | Read, write and edit `.xlsx` / `.xlsm`, styles, formulas, images, tables, notes | Yes | Yes |
+| Read `.xls`, read and write `.ods` | Yes | Yes |
 | Fill Excel templates with data, repeating rows for lists | | Yes |
 | Add column, bar, line, area and pie charts | | Yes |
+| Add pivot tables | | Yes |
+| Open and save password-protected `.xlsx` files | | Yes |
 
 Pro is $5 per developer (local pricing at checkout), with a perpetual licence and a year of updates. See the [Pro README](https://www.npmjs.com/package/@xlsxflow/pro) for details.
 
