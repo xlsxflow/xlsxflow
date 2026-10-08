@@ -20,9 +20,9 @@
 
 ---
 
-**XlsxFlow** is a zero-dependency streaming reader, writer and editor for OpenXML (`.xlsx`) files. Built on native Web APIs (like `TransformStream` and Web Crypto), it handles millions of cells in flat memory.
+**XlsxFlow** is a zero-dependency streaming reader, writer and editor for OpenXML (`.xlsx`) files. Built on native Web APIs (like `TransformStream` and `CompressionStream`), it handles millions of cells in flat memory.
 
-Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files chunk-by-chunk on the fly, so it suits edge runtimes (Cloudflare Workers, Vercel Edge, Next.js Server Actions) and browsers.
+Unlike DOM-based AST parsers (like ExcelJS or SheetJS), XlsxFlow processes files chunk-by-chunk on the fly, so it suits browsers, servers and edge runtimes that provide the same Web APIs.
 
 ## Features
 
@@ -257,7 +257,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 
 ## Changelog
 
-### Unreleased
+### v1.1.0
 
 - **New:** workbook properties (title, author, company...), defined names, hidden and very hidden sheets, and sheet views (zoom, gridlines, headings, right-to-left) in `SheetWriter`; `SheetReader.readWorkbook` reads them back.
 - **Fixed:** sheets with frozen panes were all marked as selected, so Excel opened them grouped.
