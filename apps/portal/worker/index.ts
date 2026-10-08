@@ -11,7 +11,8 @@ interface Env {
 }
 
 const CONTACT = "palikaomkar@gmail.com";
-const ORDER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GOOGLE_VERIFICATION = "/google6a548f2f6ab557df.html";
+const ORDER_ID =/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // A reason the buyer can act on; anything else is logged and shown as a generic error
 class Refusal extends Error {}
@@ -99,6 +100,8 @@ async function issueLicence(body: unknown, env: Env): Promise<Result> {
 const worker = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+    // Google Search Console checks this exact URL, and the assets would redirect it to drop ".html"
+    if (url.pathname === GOOGLE_VERIFICATION) return new Response(`google-site-verification: ${GOOGLE_VERIFICATION.slice(1)}`, { headers: { "Content-Type": "text/html" } });
     if (url.pathname !== "/api/licence") return env.ASSETS.fetch(request);
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
     // JSON only: a cross-site form can't send it without a CORS preflight, which this endpoint never allows
