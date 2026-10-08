@@ -223,7 +223,7 @@ export default function Home() {
                 that usually needs Excel itself: templates, charts, pivot tables and passwords.
               </p>
               <ul className="flex flex-col gap-2 text-muted list-disc pl-5">
-                <li>$5 per developer, with local pricing at checkout.</li>
+                <li>$5 per developer, one-time payment.</li>
                 <li>Perpetual licence, with every version released within a year of your order.</li>
                 <li>Build servers and CI don&apos;t need their own key.</li>
                 <li>Full refund within 14 days if it doesn&apos;t work for you, processed by Polar.</li>

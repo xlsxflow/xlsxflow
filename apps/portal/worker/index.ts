@@ -59,7 +59,7 @@ async function issueLicence(body: unknown, env: Env): Promise<{ success: true; l
     if (typeof buyer !== "string" || buyer.trim().toLowerCase() !== email.trim().toLowerCase()) {
       throw new Refusal("Order not found or invalid.");
     }
-    // The product decides the tier, not the amount: discounts and local pricing change the price
+    // The product decides the tier, not the amount: discounts change the price
     if (order.product_id !== productId) throw new Refusal("This order is not for XlsxFlow Pro.");
     if (order.status !== "paid") {
       throw new Refusal(`This order is ${typeof order.status === "string" ? order.status.replace(/_/g, " ") : "not paid"}.`);
