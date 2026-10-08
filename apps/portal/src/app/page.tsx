@@ -58,9 +58,10 @@ export default function Home() {
       </header>
 
       <main className="flex-1">
-        <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-16 grid gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-center">
-          <div className="flex flex-col gap-6">
-            <h1 className="display text-[56px] sm:text-[76px] lg:text-[84px]">Read, write and edit xlsx as a stream.</h1>
+        {/* Phones: one column. Tablets: headline beside the intro, sheet below. Desktops: sheet on the right. */}
+        <section className="max-w-6xl mx-auto px-4 sm:px-6 pt-12 sm:pt-16 pb-16 grid gap-x-8 lg:gap-x-12 gap-y-6 md:grid-cols-2 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <h1 className="display text-[clamp(48px,6.6vw,84px)] lg:col-start-1 lg:row-start-1 lg:self-end">Read, write and edit xlsx as a stream.</h1>
+          <div className="flex flex-col gap-6 md:col-start-2 md:row-start-1 lg:col-start-1 lg:row-start-2">
             <p className="text-lg text-muted max-w-[38ch]">
               A JavaScript library with no dependencies. Rows go through one at a time, so memory stays flat whether the
               file has a hundred rows or a million. Runs in Node, Bun, browsers and Cloudflare Workers.
@@ -70,7 +71,7 @@ export default function Home() {
               Also reads .xls and .ods, and writes .ods. Free under the MIT licence.
             </p>
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 mt-4 md:col-span-2 lg:mt-0 lg:col-span-1 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:self-center">
             <SheetDemo />
             <p className="mt-2 text-sm text-muted">
               This sample was written by SheetWriter in your browser a moment ago, then read back by SheetReader. Open
@@ -94,9 +95,9 @@ export default function Home() {
         </section>
 
         <section id="pro" className="border-t border-grid scroll-mt-4">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 grid gap-10 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 grid gap-10 md:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
             <div className="min-w-0">
-              <h2 className="display text-[44px] sm:text-[56px] mb-6">Free, and Pro for $5.</h2>
+              <h2 className="display text-[clamp(40px,5vw,56px)] mb-6">Free, and Pro for $5.</h2>
               <div className="overflow-x-auto">
                 <table className="w-full text-[15px] border-t border-grid">
                   <thead>
@@ -119,7 +120,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-5 lg:pt-3">
+            <div className="flex flex-col gap-5 md:pt-3">
               <p>
                 <strong className="font-semibold">@xlsxflow/pro</strong> is an add-on to the core package for the work
                 that usually needs Excel itself: templates, charts, pivot tables and passwords.
@@ -141,7 +142,7 @@ export default function Home() {
         </section>
 
         <section id="licence" className="border-t border-grid scroll-mt-4">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 grid gap-8 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
             <div className="flex flex-col gap-4 max-w-prose">
               <h2 className="text-2xl font-semibold">Get your licence key</h2>
               <p className="text-muted">

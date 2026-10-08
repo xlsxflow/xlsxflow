@@ -153,7 +153,7 @@ export default function SheetDemo() {
     >
       {/* Title bar */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2 border-b border-grid">
-        <span className="font-medium text-sm truncate min-w-0 flex-1">{file?.name ?? "Making a sample file"}</span>
+        <span className="font-medium text-sm truncate min-w-0 grow basis-full sm:basis-0">{file?.name ?? "Making a sample file"}</span>
         <div className="flex items-center gap-2 text-sm">
           {isSample && file && (
             <button onClick={download} className="px-3 py-1 border border-grid hover:border-ink rounded-sm">Download it</button>
