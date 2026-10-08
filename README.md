@@ -327,7 +327,7 @@ Read benchmark: a 100,000 × 10 file written by ExcelJS (shared strings, numbers
 | Add pivot tables | | Yes |
 | Open and save password-protected `.xlsx` files | | Yes |
 
-Pro is $5 per developer, paid once, with a perpetual licence and a year of updates. Get it, and your licence key, on the [XlsxFlow website](https://xlsxflow.xlsxflow.workers.dev/#pro). See the [Pro README](https://www.npmjs.com/package/@xlsxflow/pro) for details.
+Pro is $5 per developer, paid once, with a perpetual licence and a year of updates. Get it, and your licence key, on the [XlsxFlow website](https://www.xlsxflow.workers.dev/#pro). See the [Pro README](https://www.npmjs.com/package/@xlsxflow/pro) for details.
 
 ## Changelog
 
