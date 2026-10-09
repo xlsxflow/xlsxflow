@@ -9,6 +9,7 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
   [![CI](https://img.shields.io/github/actions/workflow/status/xlsxflow/xlsxflow/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/xlsxflow/xlsxflow/actions/workflows/ci.yml)
   [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/xlsxflow/xlsxflow?label=OpenSSF%20Scorecard&style=flat-square)](https://scorecard.dev/viewer/?uri=github.com/xlsxflow/xlsxflow)
+  [![OpenSSF Best Practices](https://img.shields.io/cii/level/15329?label=OpenSSF%20Best%20Practices&style=flat-square)](https://www.bestpractices.dev/projects/15329)
 
   <p>
     <a href="#features">Features</a> •
@@ -295,7 +296,7 @@ Every push and pull request runs, [in public CI](https://github.com/xlsxflow/xls
 - the README's claims, checked in Node, Bun, Deno, Chromium, Firefox, WebKit and Cloudflare Workers;
 - written and edited workbooks validated against the Office Open XML schema with Microsoft's [Open XML SDK](https://github.com/dotnet/Open-XML-SDK), then opened and recalculated in LibreOffice.
 
-[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/xlsxflow/xlsxflow) and CodeQL check the repository, and npm releases are published from CI with [provenance](https://docs.npmjs.com/generating-provenance-statements).
+The project holds the [OpenSSF Best Practices](https://www.bestpractices.dev/projects/15329) passing badge; [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/xlsxflow/xlsxflow) and CodeQL check the repository, and npm releases are published from CI with [provenance](https://docs.npmjs.com/generating-provenance-statements).
 
 ## Benchmarks
 
