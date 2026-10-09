@@ -60,7 +60,7 @@ function sample() {
     ['d', 4],
     [{ value: 'e', hyperlink: 'https://example.com' }, 5],
   ], {
-    mergeCells: ['A5:B5'],
+    mergeCells: ['A8:B8'], // below the table: Excel tables cannot hold merged cells
     conditionalFormats: [{ range: 'B2:B6', rule: { type: 'expression', formula: '$B2>2', style: { font: { bold: true } } } }],
     dataValidations: [{ sqref: 'B2:B6', type: 'whole', operator: 'greaterThan', formula1: '0' }],
     tables: [{ name: 'Items', ref: 'A1:B6' }],
@@ -82,7 +82,7 @@ describe('SheetEditor.insertRows / deleteRows', () => {
     expect(other.get(1)!.formulas).toEqual(['Data!B6', 'SUM(Data!B2:B8)', 'B1']);
 
     const sheet = await entry(out, 'xl/worksheets/sheet1.xml');
-    expect(sheet).toContain('<mergeCell ref="A7:B7"/>');
+    expect(sheet).toContain('<mergeCell ref="A10:B10"/>');
     expect(sheet).toContain('sqref="B2:B8"');
     expect(sheet).toContain('<formula>$B2&gt;2</formula>');
     expect(sheet).toMatch(/<hyperlink ref="A8"/);
@@ -105,7 +105,7 @@ describe('SheetEditor.insertRows / deleteRows', () => {
     expect((await read(out, 'Other')).get(1)!.formulas).toEqual(['Data!#REF!', 'SUM(Data!B2:B4)', 'B1']);
 
     const sheet = await entry(out, 'xl/worksheets/sheet1.xml');
-    expect(sheet).not.toContain('mergeCell'); // A5:B5 was deleted
+    expect(sheet).toContain('<mergeCell ref="A6:B6"/>');
     expect(sheet).toContain('sqref="B2:B4"');
     expect(sheet).toMatch(/<hyperlink ref="A4"/);
     expect(await entry(out, 'xl/comments1.xml')).not.toContain('<comment ');
@@ -156,7 +156,7 @@ describe('SheetEditor.insertColumns / deleteColumns', () => {
     expect((await read(out, 'Other')).get(1)!.formulas).toEqual(['Data!D4', 'SUM(Data!D2:D6)', 'B1']);
 
     const sheet = await entry(out, 'xl/worksheets/sheet1.xml');
-    expect(sheet).toContain('<mergeCell ref="A5:D5"/>');
+    expect(sheet).toContain('<mergeCell ref="A8:D8"/>');
     expect(sheet).toContain('sqref="D2:D6"');
     expect(sheet).toContain('<formula>$D2&gt;2</formula>');
     const table = await entry(out, 'xl/tables/table1.xml');
@@ -174,7 +174,7 @@ describe('SheetEditor.insertColumns / deleteColumns', () => {
     expect((await read(out, 'Other')).get(1)!.formulas).toEqual(['Data!#REF!', 'SUM(Data!#REF!)', 'B1']);
 
     const sheet = await entry(out, 'xl/worksheets/sheet1.xml');
-    expect(sheet).not.toContain('mergeCell');       // A5:B5 is down to one cell
+    expect(sheet).not.toContain('mergeCell');       // A8:B8 is down to one cell
     expect(sheet).not.toContain('conditionalFormatting');
     expect(sheet).not.toContain('dataValidation');
     const table = await entry(out, 'xl/tables/table1.xml');

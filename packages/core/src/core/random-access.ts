@@ -22,8 +22,16 @@ export function createBlobReader(blob: Blob): RandomAccessReader {
       return new Uint8Array(await slice.arrayBuffer());
     },
     stream(offset: number, length: number): ReadableStream<Uint8Array> {
-      const slice = blob.slice(offset, offset + length);
-      return slice.stream();
+      // Bun's Blob.slice(start, end).stream() runs on to the end of the original blob, so stop at length
+      let left = length;
+      return blob.slice(offset, offset + length).stream().pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
+        start(controller) { if (left <= 0) controller.terminate(); },
+        transform(chunk, controller) {
+          controller.enqueue(chunk.length > left ? chunk.subarray(0, left) : chunk);
+          left -= chunk.length;
+          if (left <= 0) controller.terminate();
+        }
+      }));
     },
     async close() {}
   };

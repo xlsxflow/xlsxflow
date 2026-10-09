@@ -29,7 +29,7 @@ Rows are read and written one at a time instead of loading the whole workbook, s
 
 - **No dependencies**: TypeScript on Web APIs (`ReadableStream`, `CompressionStream`, `Blob`).
 - **Streaming**: rows are read and written one at a time, so memory stays flat as files grow (10M cells written with about 1 MB of extra heap; see [Benchmarks](#benchmarks)).
-- **Runs anywhere with Web APIs**: tested on Node 20.12+, Bun, browsers and Cloudflare Workers (without `nodejs_compat`). Deno provides the same APIs but is not tested yet.
+- **Runs anywhere with Web APIs**: tested on Node 20.12 and later, Bun, Deno, Chrome and Cloudflare Workers (without `nodejs_compat`).
 - **Read, write and edit**: stream rows out of a file, generate one on the fly, or change cells, rows, columns and sheets of an existing file while keeping everything else in it.
 - **Styles and formulas**: fonts, fills, borders, alignment, number formats, conditional formats, validations, tables, notes, hyperlinks, autofilters, images, protection and page setup. Formulas and styles read back too.
 - **Older and open formats**: the same reader opens Excel 97-2003 `.xls` files and OpenDocument `.ods` files, and `OdsWriter` writes `.ods`.
@@ -89,10 +89,19 @@ Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB unco
 In Node.js, read straight from disk with `XlsxFlow.readFile`, or pass `await createFileReader(path)` to any function that takes a reader:
 
 ```typescript
-import { XlsxFlow } from '@xlsxflow/core';
+import { XlsxFlow, SheetReader, createFileReader } from '@xlsxflow/core';
 
 for await (const row of await XlsxFlow.readFile('./data.xlsx')) {
   console.log(row.cells);
+}
+
+// createFileReader keeps the file open until you close it, after you are done with
+// everything read through it (Node 25 stops the process when an open file is garbage-collected)
+const file = await createFileReader('./data.xlsx');
+try {
+  console.log((await new SheetReader().readWorkbook(file)).sheets);
+} finally {
+  await file.close();
 }
 ```
 
@@ -243,7 +252,7 @@ writer.addSheet('Report', rows, {
   protection: { password: 'secret', sort: true },  // Excel's legacy hash: deters edits, is not encryption
   pageSetup: { orientation: 'landscape', paperSize: 9, fitToWidth: 1, fitToHeight: 0, printArea: 'A1:C100', printTitleRows: '1', footer: '&CPage &P of &N' },
   tabColor: 'FF00B050',
-  mergeCells: ['A1:C1'],
+  mergeCells: ['E1:G1'],   // not inside a table: Excel tables cannot hold merged cells
   columnWidths: [30, 12],  // in characters; `columns[i].width` wins where both are set
   autoFitColumns: true,    // widths from the longest value (array rows only)
 });
@@ -253,11 +262,11 @@ writer.addSheet('Report', rows, {
 
 Formulas are stored for Excel to calculate when it opens the file. For array rows, the writer also stores a cached result for simple formulas (`SUM`, `AVERAGE`, `COUNT`, `MIN`, `MAX`, `IF`, `CONCATENATE`, `&`, comparisons and arithmetic, including over other formula cells), so other readers see a value. Errors are stored as error values (`#DIV/0!`). Rows from an AsyncIterable get no cached results, since the writer cannot look back at them.
 
-Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when values repeat, but the distinct strings stay in memory until the file is finished.
+Strings are written inline, which keeps memory flat. `new SheetWriter({ sharedStrings: true })` stores each distinct string once instead. Files are smaller when many different strings repeat (with only a handful of distinct values, inline strings compress as well or better), but the distinct strings stay in memory until the file is finished.
 
 ## Compared with SheetJS and ExcelJS
 
-Checked against each project's own documentation on 8 October 2026. "Pro" means a paid add-on.
+Checked against each project's own documentation, and ExcelJS 4.4.0's published code, on 9 October 2026. "Pro" means a paid add-on.
 
 | | XlsxFlow | SheetJS Community Edition | ExcelJS 4.4 |
 |---|---|---|---|
@@ -268,7 +277,7 @@ Checked against each project's own documentation on 8 October 2026. "Pro" means 
 | `.ods` | Read and write | Read and write | No |
 | `.xlsb`, `.numbers` and other formats | No | Yes | No |
 | Charts | Add (Pro) | No (SheetJS Pro) | No |
-| Pivot tables | Add (Pro) | No (SheetJS Pro) | Partial, undocumented |
+| Pivot tables | Add (Pro) | No (SheetJS Pro) | No |
 | Password-protected files | Open and save (Pro) | Old `.xls` obfuscation only (SheetJS Pro opens AES files) | No |
 | Licence | MIT, Pro is paid | Apache 2.0 | MIT |
 

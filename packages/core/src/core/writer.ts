@@ -220,6 +220,9 @@ export class SheetWriter {
         if (!m) throw new Error(`Invalid table range "${table.ref}".`);
         const box = parseRange(table.ref, 'table range');
         if (boxes.some(b => overlaps(b, box))) throw new Error(`Table "${table.name}" overlaps another table on sheet "${sheet.name}".`);
+        // Excel tables cannot hold merged cells: it repairs the file by removing the table
+        const merge = sheet.options.mergeCells?.find(ref => overlaps(parseRange(ref, 'merge range'), box));
+        if (merge) throw new Error(`Merge "${merge}" overlaps table "${table.name}" on sheet "${sheet.name}"; Excel tables cannot contain merged cells.`);
         boxes.push(box);
         const first = colIndex(m[1]);
         const width = colIndex(m[3]) - first + 1;

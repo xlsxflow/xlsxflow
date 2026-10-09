@@ -73,22 +73,33 @@ export class ZipStreamWriter {
     let uncompressedSize = 0;
     let crc = 0xffffffff;
 
-    const crcStream = new TransformStream<Uint8Array, Uint8Array>({
-      // CompressionStream takes every write at once, so the input is held back here instead,
-      // while nobody reads the output
-      transform: async (chunk, controller) => {
-        await this.roomInQueue();
-        uncompressedSize += chunk.length;
-        crc = crc32Update(crc, chunk);
-        controller.enqueue(chunk);
+    const compressor = new CompressionStream('deflate-raw') as any as TransformStream<Uint8Array, Uint8Array>;
+    const writer = compressor.writable.getWriter();
+    const reader = compressor.readable.getReader();
+    const input = inputStream.getReader();
+    // Node's and Bun's CompressionStream accept thousands of writes without backpressure, so one chunk
+    // is fed at a time: a write resolves once the chunk is compressed, which waits while nobody reads
+    // the output. Rows are then only pulled as fast as the ZIP is consumed.
+    const feed = (async () => {
+      try {
+        while (true) {
+          const { done, value } = await input.read();
+          if (done) break;
+          await this.roomInQueue();
+          uncompressedSize += value.length;
+          crc = crc32Update(crc, value);
+          await writer.write(value);
+        }
+        await writer.close();
+      } catch (err) {
+        // Stop the source too (a row generator's finally runs, a database cursor closes)
+        await input.cancel(err).catch(() => {});
+        await writer.abort(err).catch(() => {});
+        throw err;
       }
-    });
+    })();
 
     let compressedSize = 0;
-    const reader = inputStream
-      .pipeThrough(crcStream)
-      .pipeThrough(new CompressionStream('deflate-raw') as any as TransformStream<Uint8Array, Uint8Array>)
-      .getReader();
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -96,9 +107,11 @@ export class ZipStreamWriter {
         compressedSize += value.length;
         await this.pushChunk(value);
       }
+      await feed;
     } catch (err) {
-      // Stop the source too (a row generator's finally runs, a database cursor closes)
       await reader.cancel(err).catch(() => {});
+      await input.cancel(err).catch(() => {});
+      await feed.catch(() => {});
       throw err;
     }
 

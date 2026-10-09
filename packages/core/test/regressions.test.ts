@@ -3,7 +3,7 @@ import { SheetWriter } from '../src/core/writer';
 import { SheetEditor } from '../src/core/editor';
 import { SheetReader } from '../src/core/index';
 import { ZipRandomAccessParser } from '../src/core/zip-random-access';
-import { ZipStreamWriter } from '../src/core/zip-stream-writer';
+import { ZipStreamWriter, crc32Update } from '../src/core/zip-stream-writer';
 import { createBlobReader } from '../src/core/random-access';
 import { resolveSheetPaths } from '../src/core/utils';
 import { Row } from '../src/core/types';
@@ -81,6 +81,52 @@ describe('regressions', () => {
     await zip.close();
     await drain;
     expect(produced).toBe(64);
+  });
+
+  it('ZIP writer stops feeding the compressor while nobody reads', async () => {
+    const zip = new ZipStreamWriter();
+    let produced = 0;
+    const random = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (produced >= 200) return c.close();
+        produced++;
+        c.enqueue(crypto.getRandomValues(new Uint8Array(64 * 1024)));
+      }
+    });
+    const done = zip.addFile('random.bin', random);
+    await new Promise(r => setTimeout(r, 300));
+    expect(produced).toBeLessThan(40); // 1 MiB queue plus a few chunks in flight, not all 13 MB
+    const reader = zip.stream.getReader();
+    const drain = (async () => { while (!(await reader.read()).done); })();
+    await done;
+    await zip.close();
+    await drain;
+    expect(produced).toBe(200);
+  });
+
+  it('reads stored entries where Blob.slice().stream() runs past its end (Bun)', async () => {
+    const file = new Blob([await bytesOf(new SheetWriter().addSheet('S', [['x']]).write())]);
+    // An .ods starts with a stored "mimetype" entry; any stored entry shows the overrun
+    const zip = new ZipStreamWriter();
+    const done = bytesOf(zip.stream);
+    const mimetype = new TextEncoder().encode('application/vnd.oasis.opendocument.spreadsheet');
+    await zip.addCompressedFile('mimetype', new Blob([mimetype]).stream(), 46, 46, (crc32Update(0xffffffff, mimetype) ^ 0xffffffff) >>> 0, 0);
+    await zip.close();
+    const stored = new Blob([await done]);
+    const bunLike = (b: Blob) => createBlobReader({ size: b.size, slice: (start: number) => b.slice(start) } as unknown as Blob);
+    const parser = new ZipRandomAccessParser(bunLike(stored));
+    await parser.parseCentralDirectory();
+    expect(await new Response(await parser.extractStream('mimetype')).text()).toBe('application/vnd.oasis.opendocument.spreadsheet');
+    const rows: unknown[] = [];
+    for await (const r of await new SheetReader().parse(bunLike(file))) rows.push(r.cells);
+    expect(rows).toEqual([['x']]);
+  });
+
+  it('refuses a merge inside a table', async () => {
+    const rows = [['a', 'b', 'c'], [1, 2, 3]];
+    const writer = new SheetWriter().addSheet('S', rows, { tables: [{ name: 'Tbl', ref: 'A1:C2' }], mergeCells: ['A1:B1'] });
+    await expect(bytesOf(writer.write())).rejects.toThrow(/Merge "A1:B1" overlaps table "Tbl"/);
+    await bytesOf(new SheetWriter().addSheet('S', rows, { tables: [{ name: 'Tbl', ref: 'A1:C2' }], mergeCells: ['E1:F1'] }).write());
   });
 
   it('resolves absolute targets, attribute order and escaped names', () => {

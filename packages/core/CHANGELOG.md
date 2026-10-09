@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.5
+
+Fixes found while testing every claim in the README on Node 20.12 and 25, Bun, Deno, Chrome and Cloudflare Workers.
+
+### Fixed
+
+- `SheetWriter`, `SheetEditor` and `OdsWriter` wait while nobody reads their output on Node and Bun too. Their `CompressionStream` takes thousands of chunks without pushing back, so a slow consumer let the writer pull the whole row source into memory.
+- On Bun, `.ods` files and other ZIP entries stored without compression read correctly. Bun's `Blob.slice().stream()` runs past the end of the slice, which 1.1.4's size check rejected.
+- `SheetWriter` refuses a merge that overlaps a table. Excel tables cannot hold merged cells, and Excel repaired such files by removing the table.
+
+### Docs
+
+- The README says to close a `createFileReader` reader (Node 25 stops the process when an open file is garbage-collected), lists Deno as tested, fixes the sheet-options example that merged cells inside a table, and corrects the comparison table: ExcelJS 4.4 has no pivot tables.
+
 ## 1.1.4
 
 Fixes from the third round of end-user tests (700 cases).
