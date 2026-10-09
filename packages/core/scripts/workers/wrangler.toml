@@ -1,3 +1,0 @@
-name = "xlsxflow-workers-check"
-main = "worker.mjs"
-compatibility_date = "2026-10-01"

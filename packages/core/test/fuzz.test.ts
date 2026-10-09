@@ -50,7 +50,8 @@ describe('xml tokenizer is linear on hostile input', () => {
     it(name, async () => {
       const t0 = performance.now();
       await withTimeout(drainTokens(new TextEncoder().encode(xml), 4096), 10_000, name);
-      expect(performance.now() - t0).toBeLessThan(3000);
+      // Linear takes well under a second; quadratic would take minutes. The margin covers slow CI and coverage runs
+      expect(performance.now() - t0).toBeLessThan(8000);
     }, 15_000);
   }
 });

@@ -1,0 +1,102 @@
+name: CI
+
+# Every push and pull request: the test suite on each supported Node version with coverage, the README's
+# claims on every runtime the README names, and the files we write checked against Microsoft's Open XML
+# SDK and opened in LibreOffice.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: packages/core
+
+jobs:
+  test:
+    name: Tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: pnpm install --frozen-lockfile --filter @xlsxflow/core
+      - if: matrix.node != 24
+        run: pnpm test
+      - if: matrix.node == 24
+        name: pnpm coverage
+        run: |
+          pnpm coverage
+          node -e "const t = require('./coverage/coverage-summary.json').total; console.log('### Test coverage\n\n| Lines | Statements | Functions | Branches |\n|---|---|---|---|\n| ' + ['lines', 'statements', 'functions', 'branches'].map((k) => t[k].pct + '%').join(' | ') + ' |')" >> "$GITHUB_STEP_SUMMARY"
+      - run: pnpm build
+      - run: node scripts/claims/run.mjs
+
+  runtimes:
+    name: README claims (Bun, Deno, browsers, Workers)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 12.4.2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+      - run: pnpm install --frozen-lockfile --filter @xlsxflow/core
+      - run: pnpm build
+      - run: bun scripts/claims/run.mjs
+      - run: deno run --allow-read scripts/claims/run.mjs
+      - name: Install Playwright
+        run: |
+          npm install --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium firefox webkit
+      - run: node scripts/claims/run.mjs --browsers
+        env:
+          PLAYWRIGHT: ${{ runner.temp }}/pw/node_modules/playwright/index.mjs
+      - run: node scripts/claims/run.mjs --worker
+
+  conformance:
+    name: Open XML SDK schema and LibreOffice
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-calc
+          pip install openpyxl==3.1.5
+      - run: python scripts/libreoffice/check.py

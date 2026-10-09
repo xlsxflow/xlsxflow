@@ -193,7 +193,7 @@ def main():
     shutil.rmtree(OUT, ignore_errors=True)
     OUT.mkdir()
     openpyxl_sources()
-    subprocess.run('npx tsx scripts/libreoffice/make.ts scripts/libreoffice/out', shell=True, check=True, cwd=HERE.parents[1])
+    subprocess.run('npx -y tsx@4.23.15 scripts/libreoffice/make.ts scripts/libreoffice/out', shell=True, check=True, cwd=HERE.parents[1])
     expected = json.loads((OUT / 'expected.json').read_text())
 
     failures, ran = 0, 0
@@ -210,6 +210,8 @@ def main():
         print('LibreOffice check skipped: LibreOffice was not found (install it or set SOFFICE)')
     if not ran:
         sys.exit('No check ran')
+    if os.environ.get('CI') and ran < 2:
+        sys.exit('CI runs both checks')
     sys.exit(1 if failures else 0)
 
 

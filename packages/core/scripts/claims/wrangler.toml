@@ -1,0 +1,4 @@
+name = "xlsxflow-readme-claims"
+main = "worker.mjs"
+compatibility_date = "2026-10-01"
+rules = [{ type = "Data", globs = ["**/*.xls", "**/*.ods", "**/*.xlsx", "**/*.png", "**/*.jpg", "**/*.gif"], fallthrough = false }]

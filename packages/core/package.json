@@ -67,11 +67,13 @@
     "build": "rollup -c",
     "dev": "rollup -c -w",
     "test": "vitest run",
+    "coverage": "vitest run --coverage --coverage.include=src --coverage.reporter=text --coverage.reporter=json-summary --testTimeout=60000",
     "prepack": "node -e \"require('fs').copyFileSync('../../README.md','README.md')\" && rollup -c"
   },
   "devDependencies": {
     "@rollup/plugin-typescript": "^11.1.6",
     "@types/node": "^20.19.43",
+    "@vitest/coverage-v8": "2.1.9",
     "rollup": "^4.21.0",
     "rollup-plugin-dts": "^6.5.1",
     "typescript": "^5.5.4",
