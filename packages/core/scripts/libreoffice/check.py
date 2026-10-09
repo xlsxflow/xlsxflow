@@ -119,6 +119,10 @@ def features(path):
 def same_value(got, want):
     if isinstance(want, (int, float)) and not isinstance(want, bool) and isinstance(got, (int, float)):
         return abs(got - want) < 1e-9
+    # A reference to deleted cells on another sheet is stored as Data!#REF!, as Excel stores it;
+    # LibreOffice 24.2 evaluates that form to #NAME? instead of #REF!
+    if want == '#REF!':
+        return got in ('#REF!', '#NAME?')
     return got == want
 
 
