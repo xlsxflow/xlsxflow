@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- On a runtime without `CompressionStream` or `DecompressionStream` for `deflate-raw` (Chrome before 103, Firefox before 113, Safari before 16.4), reading and writing throw an error naming the minimum versions instead of a bare `ReferenceError` or `TypeError`.
+
 ## 1.1.6
 
 ### Changed

@@ -12,6 +12,15 @@ export function crc32(bytes: Uint8Array): number {
   return (crc32Update(0xffffffff, bytes) ^ 0xffffffff) >>> 0;
 }
 
+// Older runtimes lack CompressionStream or its 'deflate-raw' format; say what is needed instead of a bare ReferenceError
+export function deflateRaw(kind: 'compress' | 'decompress'): TransformStream<Uint8Array, Uint8Array> {
+  try {
+    return (kind === 'compress' ? new CompressionStream('deflate-raw') : new DecompressionStream('deflate-raw')) as any;
+  } catch {
+    throw new Error(`XlsxFlow needs ${kind === 'compress' ? 'CompressionStream' : 'DecompressionStream'} with 'deflate-raw': Chrome 103+, Firefox 113+, Safari 16.4+, Node 20.12+, Deno, Bun or Cloudflare Workers`);
+  }
+}
+
 // Running CRC-32 over chunks: start at 0xffffffff, finish with (crc ^ 0xffffffff) >>> 0
 export function crc32Update(crc: number, bytes: Uint8Array): number {
   for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
@@ -73,7 +82,7 @@ export class ZipStreamWriter {
     let uncompressedSize = 0;
     let crc = 0xffffffff;
 
-    const compressor = new CompressionStream('deflate-raw') as any as TransformStream<Uint8Array, Uint8Array>;
+    const compressor = deflateRaw('compress');
     const writer = compressor.writable.getWriter();
     const reader = compressor.readable.getReader();
     const input = inputStream.getReader();

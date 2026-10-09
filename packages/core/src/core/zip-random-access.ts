@@ -1,5 +1,5 @@
 import { RandomAccessReader } from './random-access';
-import { crc32Update } from './zip-stream-writer';
+import { crc32Update, deflateRaw } from './zip-stream-writer';
 import { isCfb } from './cfb';
 
 export interface ZipRecord {
@@ -152,7 +152,7 @@ export class ZipRandomAccessParser {
     }
     const stream = await this.extractRawStream(filename);
     const data = record.compressionMethod === 0 ? stream
-      : stream.pipeThrough(new DecompressionStream('deflate-raw') as any as TransformStream<Uint8Array, Uint8Array>);
+      : stream.pipeThrough(deflateRaw('decompress'));
 
     // Node reports bad deflate data as a bare TypeError; name the entry instead
     const inflated = data.getReader();

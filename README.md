@@ -32,7 +32,7 @@ Rows are read and written one at a time instead of loading the whole workbook, s
 
 - **No dependencies**: TypeScript on Web APIs (`ReadableStream`, `CompressionStream`, `Blob`).
 - **Streaming**: rows are read and written one at a time, so memory stays flat as files grow (10M cells written with about 2 MB of extra heap; see [Benchmarks](#benchmarks)).
-- **Runs anywhere with Web APIs**: tested on Node 20.12 and later, Bun, Deno, Chrome, Firefox, Safari (WebKit) and Cloudflare Workers (without `nodejs_compat`).
+- **Runs anywhere with Web APIs**: tested on Node 20.12 and later, Bun, Deno, Chrome, Firefox, Safari (WebKit) and Cloudflare Workers (without `nodejs_compat`). Browsers need `CompressionStream` with `deflate-raw`: Chrome 103+, Firefox 113+, Safari 16.4+; older ones get an error saying so.
 - **Read, write and edit**: stream rows out of a file, generate one on the fly, or change cells, rows, columns and sheets of an existing file while keeping everything else in it.
 - **Styles and formulas**: fonts, fills, borders, alignment, number formats, conditional formats, validations, tables, notes, hyperlinks, autofilters, images, protection and page setup. Formulas and styles read back too.
 - **Older and open formats**: the same reader opens Excel 97-2003 `.xls` files and OpenDocument `.ods` files, and `OdsWriter` writes `.ods`.
@@ -294,6 +294,7 @@ Every push and pull request runs, [in public CI](https://github.com/xlsxflow/xls
 
 - the test suite (nearly 400 tests, including fuzz and property-based tests with [fast-check](https://fast-check.dev) on malformed ZIP and XML input and files saved by Excel, LibreOffice, SheetJS, ExcelJS, openpyxl and xlsx-populate) on Node 20, 22 and 24, with 96% line coverage;
 - the README's claims, checked in Node, Bun, Deno, Chromium, Firefox, WebKit and Cloudflare Workers;
+- 10M cells written to disk and read back with Node's heap capped at 32 MB, smaller than the 34 MB file;
 - written and edited workbooks validated against the Office Open XML schema with Microsoft's [Open XML SDK](https://github.com/dotnet/Open-XML-SDK), then opened and recalculated in LibreOffice.
 
 The project holds the [OpenSSF Best Practices](https://www.bestpractices.dev/projects/15329) passing badge; [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/xlsxflow/xlsxflow) and CodeQL check the repository, and npm releases are published from CI with [provenance](https://docs.npmjs.com/generating-provenance-statements).

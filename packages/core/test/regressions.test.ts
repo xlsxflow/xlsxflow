@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { SheetWriter } from '../src/core/writer';
 import { SheetEditor } from '../src/core/editor';
 import { SheetReader } from '../src/core/index';
@@ -290,5 +290,16 @@ describe('end-user edge cases, round 2', () => {
     expect(() => anchorXml({ at: 'XFE1' }, size, '')).toThrow(/Invalid anchor cell "XFE1"/);
     expect(() => anchorXml({ range: 'A1:A1048577' }, size, '')).toThrow(/Invalid anchor cell/);
     expect(anchorXml({ range: 'F20:A2' }, size, '')).toBe(anchorXml({ range: 'A2:F20' }, size, ''));
+  });
+});
+
+describe('runtime without deflate-raw streams', () => {
+  it('names what it needs instead of a bare ReferenceError', async () => {
+    vi.stubGlobal('CompressionStream', undefined);
+    try {
+      await expect(new Response(new SheetWriter().write([[1]])).arrayBuffer()).rejects.toThrow(/needs CompressionStream with 'deflate-raw': Chrome 103\+/);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
