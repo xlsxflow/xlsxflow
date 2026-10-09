@@ -39,6 +39,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: pnpm install --frozen-lockfile --filter @xlsxflow/core
+      - if: matrix.node == 24
+        name: Type check (strict)
+        run: npx tsc --noEmit
       - if: matrix.node != 24
         run: pnpm test
       - if: matrix.node == 24
