@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately, not in a public issue. Email palikaomkar@gmail.com with a description and, if you can, a file or script that shows the problem. You will get a reply within 7 days.
+Please report security issues privately, not in a public issue: use [Report a vulnerability](https://github.com/xlsxflow/xlsxflow/security/advisories/new) on the repository's Security tab, or email palikaomkar@gmail.com. Include a description and, if you can, a file or script that shows the problem. You will get a reply within 7 days.
 
 Fixes go into the latest release. Older versions are not patched.
 

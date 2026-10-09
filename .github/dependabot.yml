@@ -15,3 +15,11 @@ updates:
       # majors (vitest, TypeScript, @types/node kept at the oldest supported Node) are upgraded by hand
       - dependency-name: '*'
         update-types: [version-update:semver-major]
+  - package-ecosystem: npm
+    directory: /packages/core/scripts/claims
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directory: /packages/core/scripts/libreoffice
+    schedule:
+      interval: weekly

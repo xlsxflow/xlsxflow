@@ -1,5 +1,5 @@
 // Serves packages/core on localhost and runs claims.mjs in Playwright's Chromium, Firefox and WebKit.
-// Playwright comes from the `playwright` package, or the module file PLAYWRIGHT names.
+// Playwright comes from this folder's package.json (npm ci), or the module file PLAYWRIGHT names.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname } from 'node:path';

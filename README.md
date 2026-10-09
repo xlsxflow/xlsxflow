@@ -292,7 +292,7 @@ and running on Web APIs alone.
 
 Every push and pull request runs, [in public CI](https://github.com/xlsxflow/xlsxflow/actions/workflows/ci.yml):
 
-- the test suite (nearly 400 tests, including fuzzing with malformed ZIP and XML input and files saved by Excel, LibreOffice, SheetJS, ExcelJS, openpyxl and xlsx-populate) on Node 20, 22 and 24, with 96% line coverage;
+- the test suite (nearly 400 tests, including fuzz and property-based tests with [fast-check](https://fast-check.dev) on malformed ZIP and XML input and files saved by Excel, LibreOffice, SheetJS, ExcelJS, openpyxl and xlsx-populate) on Node 20, 22 and 24, with 96% line coverage;
 - the README's claims, checked in Node, Bun, Deno, Chromium, Firefox, WebKit and Cloudflare Workers;
 - written and edited workbooks validated against the Office Open XML schema with Microsoft's [Open XML SDK](https://github.com/dotnet/Open-XML-SDK), then opened and recalculated in LibreOffice.
 

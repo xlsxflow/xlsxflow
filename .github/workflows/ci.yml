@@ -75,11 +75,9 @@ jobs:
       - run: deno run --allow-read scripts/claims/run.mjs
       - name: Install Playwright
         run: |
-          npm install --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
-          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium firefox webkit
+          npm ci --prefix scripts/claims
+          scripts/claims/node_modules/.bin/playwright install --with-deps chromium firefox webkit
       - run: node scripts/claims/run.mjs --browsers
-        env:
-          PLAYWRIGHT: ${{ runner.temp }}/pw/node_modules/playwright/index.mjs
       - run: node scripts/claims/run.mjs --worker
 
   conformance:
@@ -101,5 +99,5 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libreoffice-calc
-          pip install openpyxl==3.1.5
+          pip install --require-hashes -r scripts/libreoffice/requirements.txt
       - run: python scripts/libreoffice/check.py

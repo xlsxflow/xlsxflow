@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import fc from 'fast-check';
 import { readdirSync, readFileSync, statSync } from 'fs';
 import path from 'path';
 import { SheetReader } from '../src/core/index';
@@ -105,19 +106,22 @@ describe('worksheet parser survives hostile XML', () => {
     '</sheetData><mergeCells><mergeCell ref="A1:B2"/></mergeCells></worksheet>';
   const ITER = Number(process.env.FUZZ_ITER ?? 25) * 8;
 
+  // fast-check generates the edits; a failure is shrunk to the smallest edit list that still breaks the parser
+  const edit = fc.oneof(
+    fc.record({ at: fc.nat(), insert: fc.oneof(fc.constantFrom(...FRAGMENTS), fc.string({ maxLength: 12 })) }),
+    fc.record({ at: fc.nat(), remove: fc.integer({ min: 1, max: 40 }) }),
+    fc.record({ at: fc.nat(), cut: fc.constant(true) }),
+  );
+  const apply = (edits: { at: number; insert?: string; remove?: number; cut?: boolean }[]) => edits.reduce((xml, e) => {
+    const at = e.at % (xml.length + 1);
+    return e.insert !== undefined ? xml.slice(0, at) + e.insert + xml.slice(at) : e.cut ? xml.slice(0, at) : xml.slice(0, at) + xml.slice(at + e.remove!);
+  }, BASE);
+
   it(`${ITER} mutated worksheets end in rows or an Error`, async () => {
-    const rand = rng(1234 + ITER);
-    for (let i = 0; i < ITER; i++) {
-      let xml = BASE;
-      for (let k = 0; k < 1 + Math.floor(rand() * 6); k++) {
-        const at = Math.floor(rand() * xml.length);
-        const op = rand();
-        if (op < 0.6) xml = xml.slice(0, at) + FRAGMENTS[Math.floor(rand() * FRAGMENTS.length)] + xml.slice(at);
-        else if (op < 0.9) xml = xml.slice(0, at) + xml.slice(at + Math.floor(rand() * 40));
-        else xml = xml.slice(0, at);
-      }
-      await withTimeout(parseXml(xml), 3000, `mutation #${i}: ${xml.slice(0, 200)}`);
-    }
+    await fc.assert(fc.asyncProperty(fc.array(edit, { minLength: 1, maxLength: 6 }), async (edits) => {
+      const xml = apply(edits);
+      await withTimeout(parseXml(xml), 3000, xml.slice(0, 200));
+    }), { numRuns: ITER, seed: 1234 + ITER });
   }, 300_000);
 });
 
