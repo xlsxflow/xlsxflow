@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.1.7
+
+### Added
+
+- Migration guides from [ExcelJS](https://github.com/xlsxflow/xlsxflow/blob/main/docs/migrating-from-exceljs.md) and [SheetJS](https://github.com/xlsxflow/xlsxflow/blob/main/docs/migrating-from-sheetjs.md), and [recipes](https://github.com/xlsxflow/xlsxflow/blob/main/examples/README.md) for streaming downloads, uploads, database exports and browser downloads. CI runs the recipes on every push.
 
 ### Changed
 
