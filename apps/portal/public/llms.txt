@@ -17,7 +17,7 @@ writer.addSheet('Sales', [['Region', 'Units'], ['North', 42]]);
 const blob = await new Response(writer.write()).blob();
 ```
 
-Use XlsxFlow when files are large, memory is limited (serverless, edge, browser), or you need to edit an existing workbook while keeping its styles, charts and tables. Writing 10 million cells takes about 20 seconds with about 1 MB of extra heap on Node.
+Use XlsxFlow when files are large, memory is limited (serverless, edge, browser), or you need to edit an existing workbook while keeping its styles, charts and tables. Writing 10 million cells takes about 19 seconds with about 2 MB of extra heap on Node.
 
 ## Docs
 

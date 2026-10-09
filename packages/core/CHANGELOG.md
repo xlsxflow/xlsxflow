@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.6
+
+### Changed
+
+- `SheetWriter`, `SheetEditor` and `OdsWriter` keep up to four chunks queued for compression instead of one, so building the next chunk overlaps compressing the last. Writing 10M cells takes about 10% less time; the files are the same, and the writer still waits while nobody reads its output.
+
+### Testing
+
+- Public CI on every push and pull request: the tests on Node 20, 22 and 24 with coverage; the README's claims in Node, Bun, Deno, Chromium, Firefox, WebKit and Cloudflare Workers; and written and edited files validated with Microsoft's Open XML SDK and opened in LibreOffice. OpenSSF Scorecard and CodeQL check the repository.
+
 ## 1.1.5
 
 Fixes found while testing every claim in the README on Node 20.12 and 25, Bun, Deno, Chrome and Cloudflare Workers.

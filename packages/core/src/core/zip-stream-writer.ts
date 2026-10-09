@@ -77,9 +77,11 @@ export class ZipStreamWriter {
     const writer = compressor.writable.getWriter();
     const reader = compressor.readable.getReader();
     const input = inputStream.getReader();
-    // Node's and Bun's CompressionStream accept thousands of writes without backpressure, so one chunk
-    // is fed at a time: a write resolves once the chunk is compressed, which waits while nobody reads
+    // Node's and Bun's CompressionStream accept thousands of writes without backpressure, so only a few
+    // chunks are fed ahead: a write resolves once the chunk is compressed, which waits while nobody reads
     // the output. Rows are then only pulled as fast as the ZIP is consumed.
+    // A few writes in flight keep the compressor busy while the next chunk is built
+    const inFlight: Promise<void>[] = [];
     const feed = (async () => {
       try {
         while (true) {
@@ -88,8 +90,12 @@ export class ZipStreamWriter {
           await this.roomInQueue();
           uncompressedSize += value.length;
           crc = crc32Update(crc, value);
-          await writer.write(value);
+          const written = writer.write(value);
+          written.catch(() => {}); // after a failure, writes nobody awaits any more must not go unhandled
+          inFlight.push(written);
+          if (inFlight.length >= 4) await inFlight.shift();
         }
+        await Promise.all(inFlight);
         await writer.close();
       } catch (err) {
         // Stop the source too (a row generator's finally runs, a database cursor closes)

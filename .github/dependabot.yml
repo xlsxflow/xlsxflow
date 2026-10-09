@@ -11,3 +11,7 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # majors (vitest, TypeScript, @types/node kept at the oldest supported Node) are upgraded by hand
+      - dependency-name: '*'
+        update-types: [version-update:semver-major]

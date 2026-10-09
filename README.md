@@ -7,6 +7,8 @@
   
   [![npm version](https://img.shields.io/npm/v/@xlsxflow/core.svg?style=flat-square)](https://www.npmjs.com/package/@xlsxflow/core)
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+  [![CI](https://img.shields.io/github/actions/workflow/status/xlsxflow/xlsxflow/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/xlsxflow/xlsxflow/actions/workflows/ci.yml)
+  [![OpenSSF Scorecard](https://img.shields.io/ossf-scorecard/github.com/xlsxflow/xlsxflow?label=OpenSSF%20Scorecard&style=flat-square)](https://scorecard.dev/viewer/?uri=github.com/xlsxflow/xlsxflow)
 
   <p>
     <a href="#features">Features</a> •
@@ -28,8 +30,8 @@ Rows are read and written one at a time instead of loading the whole workbook, s
 ## Features
 
 - **No dependencies**: TypeScript on Web APIs (`ReadableStream`, `CompressionStream`, `Blob`).
-- **Streaming**: rows are read and written one at a time, so memory stays flat as files grow (10M cells written with about 1 MB of extra heap; see [Benchmarks](#benchmarks)).
-- **Runs anywhere with Web APIs**: tested on Node 20.12 and later, Bun, Deno, Chrome and Cloudflare Workers (without `nodejs_compat`).
+- **Streaming**: rows are read and written one at a time, so memory stays flat as files grow (10M cells written with about 2 MB of extra heap; see [Benchmarks](#benchmarks)).
+- **Runs anywhere with Web APIs**: tested on Node 20.12 and later, Bun, Deno, Chrome, Firefox, Safari (WebKit) and Cloudflare Workers (without `nodejs_compat`).
 - **Read, write and edit**: stream rows out of a file, generate one on the fly, or change cells, rows, columns and sheets of an existing file while keeping everything else in it.
 - **Styles and formulas**: fonts, fills, borders, alignment, number formats, conditional formats, validations, tables, notes, hyperlinks, autofilters, images, protection and page setup. Formulas and styles read back too.
 - **Older and open formats**: the same reader opens Excel 97-2003 `.xls` files and OpenDocument `.ods` files, and `OdsWriter` writes `.ods`.
@@ -285,16 +287,26 @@ SheetJS reads and writes far more formats, and ExcelJS has a longer track record
 October 2023). XlsxFlow focuses on `.xlsx`: streaming in flat memory, keeping everything in a file it edits,
 and running on Web APIs alone.
 
+## Testing
+
+Every push and pull request runs, [in public CI](https://github.com/xlsxflow/xlsxflow/actions/workflows/ci.yml):
+
+- the test suite (nearly 400 tests, including fuzzing with malformed ZIP and XML input and files saved by Excel, LibreOffice, SheetJS, ExcelJS, openpyxl and xlsx-populate) on Node 20, 22 and 24, with 96% line coverage;
+- the README's claims, checked in Node, Bun, Deno, Chromium, Firefox, WebKit and Cloudflare Workers;
+- written and edited workbooks validated against the Office Open XML schema with Microsoft's [Open XML SDK](https://github.com/dotnet/Open-XML-SDK), then opened and recalculated in LibreOffice.
+
+[OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/xlsxflow/xlsxflow) and CodeQL check the repository, and npm releases are published from CI with [provenance](https://docs.npmjs.com/generating-provenance-statements).
+
 ## Benchmarks
 
-Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 rows (10M cells). Each library ran in its own process on Node v25.8.2 with a 4 GB heap limit, and "Heap" is the growth in heap usage. Times are from one run on a laptop with other apps open; runs on that machine varied by up to 2×, so treat differences under about 20% as a tie. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`). `BENCH_ROWS=1000000` runs 10M cells, `BENCH_LIBS=xlsxflow,exceljs` runs a subset, and a library still writing after `BENCH_TIMEOUT_MIN` minutes (default 10) is stopped. The 10M runs for SheetJS and excel4node used a 30-minute limit.
+Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 rows (10M cells). Each library ran in its own process on Node v25.8.2 with a 4 GB heap limit, and "Heap" is the growth in heap usage. XlsxFlow and ExcelJS times are medians of five alternating runs (XlsxFlow 1.1.6 was faster in all five at both sizes); the other libraries' times are from one run. The laptop had other apps open and single runs varied by up to 2×, so treat differences under about 20% as a tie. Reproduce with `npx tsx scripts/benchmark-competitors.ts` (inside `packages/core`, after `pnpm build`). `BENCH_ROWS=1000000` runs 10M cells, `BENCH_LIBS=xlsxflow,exceljs` runs a subset, and a library still writing after `BENCH_TIMEOUT_MIN` minutes (default 10) is stopped. The 10M runs for SheetJS and excel4node used a 30-minute limit.
 
 1M cells:
 
 | Library | Write Time | File Size | Heap |
 |---|---|---|---|
-| **XlsxFlow** | **2,899 ms** | **2.9 MB** | **+2 MB** |
-| ExcelJS 4.4 (streaming writer) | 3,397 ms | 3.0 MB | +9 MB |
+| **XlsxFlow** | **1,723 ms** | **2.9 MB** | **+2 MB** |
+| ExcelJS 4.4 (streaming writer) | 2,290 ms | 3.0 MB | +9 MB |
 | SheetJS 0.20.3, `compression: true` | 4,370 ms | 8.4 MB | +140 MB |
 | SheetJS 0.20.3, default options | 5,379 ms | 31.4 MB | +140 MB |
 | write-excel-file | 7,681 ms | 2.8 MB | +2 MB |
@@ -306,8 +318,8 @@ Write benchmark: 10 numeric columns, at 100,000 rows (1M cells) and 1,000,000 ro
 
 | Library | Write Time | File Size | Heap |
 |---|---|---|---|
-| **XlsxFlow** | **19.5 s** | **29.9 MB** | **+1 MB** |
-| ExcelJS 4.4 (streaming writer) | 22.0 s | 31.2 MB | +7 MB |
+| **XlsxFlow** | **19.1 s** | **29.9 MB** | **+2 MB** |
+| ExcelJS 4.4 (streaming writer) | 20.5 s | 31.2 MB | +7 MB |
 | write-excel-file | 68.1 s | 29.3 MB | +1 MB |
 | xlsx-populate | 75.3 s | 30.0 MB | +1,118 MB |
 | SheetJS 0.20.3 (with and without compression) | not finished after 30 min | | |
