@@ -1,0 +1,43 @@
+# The libraries XlsxFlow is benchmarked against, at the versions people install. Only
+# the benchmark scripts load them, on files they make themselves; they are not
+# dependencies of @xlsxflow/core, which has none.
+
+[[IgnoredVulns]]
+id = "GHSA-5p2g-fcmc-qvqq"
+reason = "image-size, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-w3rx-r6r6-pgpr"
+reason = "image-size, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-36fh-84j7-cv5h"
+reason = "jszip, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-jg8v-48h5-wgxg"
+reason = "jszip, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-w5hq-g745-h8pq"
+reason = "uuid, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-3x9f-74h4-2fqr"
+reason = "xlsx, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-4r6h-8v6p-xvw6"
+reason = "xlsx, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-5pgg-2g8v-p4x9"
+reason = "xlsx, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-8vcr-vxm8-293m"
+reason = "xlsx, used only by the benchmark against other libraries"
+
+[[IgnoredVulns]]
+id = "GHSA-g973-978j-2c3p"
+reason = "xlsx, used only by the benchmark against other libraries"

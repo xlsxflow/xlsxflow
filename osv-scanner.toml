@@ -1,0 +1,3 @@
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+reason = "braces has no fixed version; it is only in the website's eslint (a dev tool), not in @xlsxflow/core, which has no dependencies"
