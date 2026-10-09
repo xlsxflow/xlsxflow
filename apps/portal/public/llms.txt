@@ -22,6 +22,9 @@ Use XlsxFlow when files are large, memory is limited (serverless, edge, browser)
 ## Docs
 
 - [README and API documentation](https://github.com/xlsxflow/xlsxflow#readme): reading, writing, editing, styles, formulas, CSV, .xls and .ods
+- [Recipes](https://github.com/xlsxflow/xlsxflow/blob/main/examples/README.md): streaming downloads from Next.js, Cloudflare Workers, Bun, Deno and Express; reading uploads; database exports; a browser "Export to Excel" button
+- [Migrating from ExcelJS](https://github.com/xlsxflow/xlsxflow/blob/main/docs/migrating-from-exceljs.md): each ExcelJS task with its XlsxFlow equivalent
+- [Migrating from SheetJS](https://github.com/xlsxflow/xlsxflow/blob/main/docs/migrating-from-sheetjs.md): each SheetJS (xlsx) task with its XlsxFlow equivalent
 - [Benchmarks](https://github.com/xlsxflow/xlsxflow#benchmarks): against ExcelJS, SheetJS and others, with the scripts to reproduce them
 - [@xlsxflow/core on npm](https://www.npmjs.com/package/@xlsxflow/core)
 

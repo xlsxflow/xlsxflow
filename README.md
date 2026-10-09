@@ -17,6 +17,7 @@
     <a href="#quick-start">Quick Start</a> •
     <a href="#styles-formulas--conditional-formats">Styles &amp; Formulas</a> •
     <a href="#compared-with-sheetjs-and-exceljs">Comparison</a> •
+    <a href="#recipes-and-migration-guides">Recipes</a> •
     <a href="#benchmarks">Benchmarks</a> •
     <a href="#free-and-pro">Free and Pro</a>
   </p>
@@ -288,12 +289,17 @@ SheetJS reads and writes far more formats, and ExcelJS has a longer track record
 October 2023). XlsxFlow focuses on `.xlsx`: streaming in flat memory, keeping everything in a file it edits,
 and running on Web APIs alone.
 
+## Recipes and migration guides
+
+- [Recipes](https://github.com/xlsxflow/xlsxflow/blob/main/examples/README.md): streaming downloads from Next.js, Cloudflare Workers, Bun, Deno and Express; reading uploads; exporting a database table; an "Export to Excel" button in the browser. Each runs in CI.
+- [Migrating from ExcelJS](https://github.com/xlsxflow/xlsxflow/blob/main/docs/migrating-from-exceljs.md) and [Migrating from SheetJS](https://github.com/xlsxflow/xlsxflow/blob/main/docs/migrating-from-sheetjs.md): each common task in both libraries, side by side, and what works differently.
+
 ## Testing
 
 Every push and pull request runs, [in public CI](https://github.com/xlsxflow/xlsxflow/actions/workflows/ci.yml):
 
 - the test suite (nearly 400 tests, including fuzz and property-based tests with [fast-check](https://fast-check.dev) on malformed ZIP and XML input and files saved by Excel, LibreOffice, SheetJS, ExcelJS, openpyxl and xlsx-populate) on Node 20, 22 and 24, with 96% line coverage;
-- the README's claims, checked in Node, Bun, Deno, Chromium, Firefox, WebKit and Cloudflare Workers;
+- the README's claims, checked in Node, Bun, Deno, Chromium, Firefox, WebKit and Cloudflare Workers, and the [recipes](https://github.com/xlsxflow/xlsxflow/blob/main/examples/README.md);
 - 10M cells written to disk and read back with Node's heap capped at 32 MB, smaller than the 34 MB file;
 - written and edited workbooks validated against the Office Open XML schema with Microsoft's [Open XML SDK](https://github.com/dotnet/Open-XML-SDK), then opened and recalculated in LibreOffice.
 
