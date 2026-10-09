@@ -4,3 +4,7 @@ packages:
 allowBuilds:
   esbuild: true
   unrs-resolver: true
+overrides:
+  # the portal's eslint pulls in versions with known advisories
+  brace-expansion@<1.1.21: ^1.1.21
+  brace-expansion@>=4 <5.0.12: ^5.0.12
