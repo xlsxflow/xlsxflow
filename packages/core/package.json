@@ -71,12 +71,12 @@
     "prepack": "node -e \"require('fs').copyFileSync('../../README.md','README.md')\" && rollup -c"
   },
   "devDependencies": {
-    "@rollup/plugin-typescript": "^11.1.6",
-    "@types/node": "^20.19.43",
-    "@vitest/coverage-v8": "2.1.9",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/node": "^26.6.4",
+    "@vitest/coverage-v8": "5.0.3",
     "rollup": "^4.21.0",
     "rollup-plugin-dts": "^6.5.1",
-    "typescript": "^5.5.4",
-    "vitest": "^2.0.5"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
   }
 }
