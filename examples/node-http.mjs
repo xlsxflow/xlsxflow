@@ -1,6 +1,7 @@
 // Send a generated .xlsx from Express, Fastify (reply.raw) or plain node:http.
 // The file streams to the client while it is written, and stops early if the client goes away.
 import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { SheetWriter } from '@xlsxflow/core';
 
 async function* rows() {
@@ -11,7 +12,8 @@ async function* rows() {
 export function sendReport(req, res) {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="visitors.xlsx"');
-  Readable.fromWeb(new SheetWriter().addSheet('Visitors', rows()).write()).pipe(res);
+  // pipeline, unlike pipe, cancels the writer (and ends rows()) when the client disconnects
+  pipeline(Readable.fromWeb(new SheetWriter().addSheet('Visitors', rows()).write()), res).catch(() => {});
 }
 
 // Express: app.get('/report', sendReport)
