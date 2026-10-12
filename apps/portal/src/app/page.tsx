@@ -308,6 +308,8 @@ export default async function Home() {
           <nav className="flex flex-wrap gap-x-5 gap-y-2">
             <a href={REPO} className="hover:text-ink">GitHub</a>
             <a href="https://www.npmjs.com/package/@xlsxflow/core" className="hover:text-ink">npm</a>
+            <Link href="/csv-to-xlsx" className="hover:text-ink">CSV to Excel</Link>
+            <Link href="/xlsx-to-csv" className="hover:text-ink">Excel to CSV</Link>
             <a href="/pro-licence.txt" className="hover:text-ink">Pro licence</a>
             <a href="/privacy" className="hover:text-ink">Privacy</a>
             <a href={`mailto:${CONTACT}`} className="hover:text-ink">Contact</a>

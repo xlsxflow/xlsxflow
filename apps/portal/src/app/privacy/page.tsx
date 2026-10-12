@@ -14,7 +14,7 @@ export default function Privacy() {
       <div className="max-w-prose mx-auto px-4 sm:px-6 py-12 sm:py-16 flex flex-col gap-4 leading-relaxed">
         <Link href="/" className="flex items-center gap-2 font-semibold"><img src="/icon.svg" alt="XlsxFlow logo" aria-hidden className="w-6 h-6" />XlsxFlow</Link>
         <h1 className="display text-[48px] mt-6">Privacy</h1>
-        <p className="text-muted text-sm">Last updated 8 October 2026</p>
+        <p className="text-muted text-sm">Last updated 12 October 2026</p>
 
         <h2 className="text-lg font-semibold mt-6">Licence keys</h2>
         <p>
@@ -29,8 +29,8 @@ export default function Privacy() {
           privacy policy. We receive your order details, including your name and email, from Polar.
         </p>
 
-        <h2 className="text-lg font-semibold mt-6">The file reader</h2>
-        <p>Files you open in the spreadsheet on the home page are read in your browser. They are never uploaded.</p>
+        <h2 className="text-lg font-semibold mt-6">The file reader and converters</h2>
+        <p>Files you open in the spreadsheet on the home page, or convert with the CSV and Excel converters, are read in your browser. They are never uploaded.</p>
 
         <h2 className="text-lg font-semibold mt-6">Logs and cookies</h2>
         <p>
