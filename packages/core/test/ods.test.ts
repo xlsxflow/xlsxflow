@@ -37,6 +37,7 @@ describe('OpenDocument (.ods)', () => {
     expect(rows[1].formulas?.[2]).toBe('B1*2');
     expect(meta.mergedCells).toEqual(['A4:C4']);
     expect(meta.freezePanes).toMatchObject({ row: 1, col: 1 });
+    expect(meta.columnWidths).toEqual([20, 10]);
 
     const lazyRows = await readAll(blob, { sheetName: 'Lazy' });
     expect(lazyRows.rows.map(r => r.cells)).toEqual([['lazy', 1], ['rows', 2]]);

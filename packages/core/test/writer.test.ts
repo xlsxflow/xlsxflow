@@ -141,6 +141,24 @@ describe('SheetWriter', () => {
     expect(meta.freezePanes?.col).toBe(1);
   });
 
+  it('reads column widths back in the writer\'s format, gaps from JSON included', async () => {
+    const { SheetReader } = await import('../src/core/index');
+    const widthsOf = async (columnWidths: number[]) => {
+      const writer = new SheetWriter();
+      writer.addSheet('Widths', [['a', 'b', 'c', 'd']], { columnWidths, columns: [{}, {}, { hidden: true }] });
+      const file = createBlobReader(new Blob([await streamToUint8Array(writer.write()) as BlobPart]));
+      const zip = new ZipRandomAccessParser(file);
+      await zip.parseCentralDirectory();
+      expect(await new Response(await zip.extractStream('xl/worksheets/sheet1.xml')).text()).not.toContain('null');
+      const result = await new SheetReader().parse(file);
+      for await (const row of result) { }
+      return (await result.getMetadata()).columnWidths;
+    };
+    const widths = await widthsOf([12.5, , , 30]); // eslint-disable-line no-sparse-arrays
+    expect(widths).toEqual([12.5, , , 30]); // eslint-disable-line no-sparse-arrays
+    expect(await widthsOf(JSON.parse(JSON.stringify(widths)))).toEqual(widths); // [12.5, null, null, 30]
+  });
+
   it('should generate dataValidations correctly', async () => {
     const writer = new SheetWriter();
     writer.addSheet('Validation', [['Select Item']], {

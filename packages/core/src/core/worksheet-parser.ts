@@ -54,6 +54,8 @@ export interface SheetMetadata {
   mergedCells: string[];
   hiddenRows: number[];
   hiddenCols: number[];
+  // In characters, by column index from 0 (the writer's columnWidths); columns at the default width are left out
+  columnWidths: number[];
   freezePanes?: { row: number; col: number; topLeftCell: string; activePane: string };
   // hyperlink is a URL, or "#Sheet!A1" for a place in the workbook (the writer's format)
   hyperlinks: { ref: string; hyperlink: string; tooltip?: string }[];
@@ -181,6 +183,7 @@ export function parseWorksheet(
   const mergedCells: string[] = [];
   const hiddenRows: number[] = [];
   const hiddenColMarks = new Uint8Array(MAX_COLUMNS + 1); // by column; repeated <col> ranges cost nothing extra
+  const columnWidths: number[] = [];
   let padding = 0;
   const hyperlinks: SheetMetadata['hyperlinks'] = [];
   let freezePanes: SheetMetadata['freezePanes'] = undefined;
@@ -251,12 +254,15 @@ export function parseWorksheet(
                 hiddenRows.push(currentRowNumber);
               }
             } else if (token.name === 'col') {
+              // Clamp to the sheet's real width: a hostile max="999999999" must not allocate a billion entries
+              const min = Math.max(1, parseInt(token.attributes['min'] || '1', 10) || 1);
+              const max = Math.min(MAX_COLUMNS, parseInt(token.attributes['max'] || '0', 10) || 0);
               if (token.attributes['hidden'] === '1' || token.attributes['hidden'] === 'true') {
-                // Clamp to the sheet's real width: a hostile max="999999999" must not allocate a billion entries
-                const min = Math.max(1, parseInt(token.attributes['min'] || '1', 10) || 1);
-                const max = Math.min(MAX_COLUMNS, parseInt(token.attributes['max'] || '0', 10) || 0);
                 if (min <= max) hiddenColMarks.fill(1, min, max + 1);
               }
+              // A range out to the sheet's last column (LibreOffice writes 1024 or more) is the default width
+              const width = parseFloat(token.attributes['width']);
+              if (width >= 0 && max < 1024) for (let c = min; c <= max; c++) columnWidths[c - 1] = width;
             } else if (token.name === 'c') {
               inCell = true;
               currentCellType = token.attributes['t'] || null;
@@ -422,7 +428,7 @@ export function parseWorksheet(
       if (inRow || inCell || openedWorksheet && !closedWorksheet) throw new Error('Worksheet XML is cut off: the sheet ends before its closing tags.');
       const hiddenCols: number[] = [];
       hiddenColMarks.forEach((hidden, c) => { if (hidden) hiddenCols.push(c); });
-      resolveMeta({ mergedCells, hiddenRows, hiddenCols, freezePanes, hyperlinks });
+      resolveMeta({ mergedCells, hiddenRows, hiddenCols, columnWidths, freezePanes, hyperlinks });
     } catch (e) {
       rejectMeta(e);
       throw e;

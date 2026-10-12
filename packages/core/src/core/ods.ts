@@ -29,6 +29,14 @@ async function* tokens(open: TokenSource): AsyncGenerator<XmlToken> {
 
 const repeat = (value: string | undefined, max: number) => Math.min(Math.max(parseInt(value ?? '1', 10) || 1, 1), max);
 
+// A column-width ("2.258cm") in characters, the inverse of the writer's (characters * 7 + 5) / 96 inches
+const UNITS: Record<string, number> = { in: 1, cm: 2.54, mm: 25.4, pt: 72, pc: 6, px: 96 };
+function columnWidth(length: string | undefined): number | undefined {
+  const m = /^([\d.]+)(in|cm|mm|pt|pc|px)$/.exec(length ?? '');
+  if (!m) return undefined;
+  return Math.max(0, Math.round((parseFloat(m[1]) / UNITS[m[2]] * 96 - 5) / 7 * 100) / 100);
+}
+
 // "2026-10-08" or "2026-10-08T14:04:30" (local time in the file) as the ISO string the .xlsx reader returns
 function odsDate(value: string): string | null {
   const m = /^(-?\d{4,})-(\d\d)-(\d\d)(?:T(\d\d):(\d\d):(\d\d)(\.\d+)?)?/.exec(value);
@@ -130,7 +138,9 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
   let finished: Promise<void> = Promise.resolve();
 
   async function* generate(): AsyncGenerator<RowData> {
-    const meta: SheetMetadata = { mergedCells: [], hiddenRows: [], hiddenCols: [], hyperlinks: [] };
+    const meta: SheetMetadata = { mergedCells: [], hiddenRows: [], hiddenCols: [], columnWidths: [], hyperlinks: [] };
+    const columnStyles = new Map<string, number>(), columnRuns: [number, number, number][] = []; // [first, count, width]
+    let columnStyle: string | undefined;
     let done!: () => void;
     finished = new Promise(r => { done = r; });
     try {
@@ -154,6 +164,11 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
 
       for await (const t of tokens(content)) {
         if (!found) {
+          if (t.type === 'startElement' && t.name === 'style') columnStyle = t.attributes['family'] === 'table-column' ? t.attributes['name'] : undefined;
+          if (t.type === 'startElement' && t.name === 'table-column-properties' && columnStyle) {
+            const width = columnWidth(t.attributes['column-width']);
+            if (width !== undefined) columnStyles.set(columnStyle, width);
+          }
           if (t.type === 'startElement' && t.name === 'table' && (options.sheetName === undefined || t.attributes['name'] === options.sheetName)) {
             found = t.attributes['name'] ?? '';
           }
@@ -172,6 +187,8 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
             case 'table-column': {
               const n = repeat(a['number-columns-repeated'], MAX_COLUMNS - column);
               if (a['visibility'] === 'collapse') for (let c = column; c < column + n; c++) meta.hiddenCols.push(c + 1);
+              const width = columnStyles.get(a['style-name'] ?? '');
+              if (width !== undefined) columnRuns.push([column, n, width]);
               column += n;
               break;
             }
@@ -279,6 +296,11 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
       }
       if (!found) throw new Error(options.sheetName === undefined ? 'No worksheets found in the workbook.' : `Sheet with name "${options.sheetName}" not found in workbook.`);
       meta.freezePanes = await freezePanes(readText, found);
+      // Every column has a width here; the run out to the sheet's last column (1024 or more) is the default
+      const fallback = columnRuns.filter(([first, n]) => first + n >= 1024).pop()?.[2];
+      for (const [first, n, width] of columnRuns) {
+        if (width !== fallback && first + n < 1024) for (let c = first; c < first + n; c++) meta.columnWidths[c] = width;
+      }
       resolveMeta(meta);
     } catch (e) {
       rejectMeta(e);

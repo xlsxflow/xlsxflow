@@ -315,8 +315,8 @@ export class SheetWriter {
     for (let i = 0; i < colCount; i++) {
       const c = options.columns?.[i] ?? {};
       const width = c.width ?? options.columnWidths?.[i];
-      if (width === undefined && !c.hidden && !c.outlineLevel) continue;
-      colWidths += `<col min="${i + 1}" max="${i + 1}"${width !== undefined ? ` width="${escapeXml(width)}" customWidth="1"` : ''}` +
+      if (width == null && !c.hidden && !c.outlineLevel) continue;
+      colWidths += `<col min="${i + 1}" max="${i + 1}"${width != null ? ` width="${escapeXml(width)}" customWidth="1"` : ''}` +
         `${c.hidden ? ' hidden="1"' : ''}${c.outlineLevel ? ` outlineLevel="${escapeXml(c.outlineLevel)}"` : ''}/>`;
     }
     const rowOptions = Object.entries(options.rows ?? {}).map(([r, o]) => {

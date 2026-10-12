@@ -254,7 +254,7 @@ export class XlsWorkbook {
     if (!sheet.isWorksheet) throw new Error(`Sheet "${sheet.name}" is a chart or macro sheet, not a worksheet`);
 
     const rows = new Map<number, { cells: CellValue[]; formatted?: (string | undefined)[] }>();
-    const meta: SheetMetadata = { mergedCells: [], hiddenRows: [], hiddenCols: [], hyperlinks: [] };
+    const meta: SheetMetadata = { mergedCells: [], hiddenRows: [], hiddenCols: [], columnWidths: [], hyperlinks: [] };
     const set = (row: number, col: number, xf: number, value: CellValue, raw?: number) => {
       let r = rows.get(row);
       if (!r) rows.set(row, r = { cells: [] });
@@ -342,9 +342,12 @@ export class XlsWorkbook {
         case 0x0208: // ROW
           if (u16(d, 12) & 0x20) meta.hiddenRows.push(u16(d, 0) + 1);
           break;
-        case 0x007d: // COLINFO
-          if (u16(d, 8) & 1) for (let c = u16(d, 0); c <= Math.min(u16(d, 2), 255); c++) meta.hiddenCols.push(c + 1);
+        case 0x007d: { // COLINFO; the width is in 1/256 characters
+          const last = Math.min(u16(d, 2), 255);
+          if (u16(d, 8) & 1) for (let c = u16(d, 0); c <= last; c++) meta.hiddenCols.push(c + 1);
+          for (let c = u16(d, 0); c <= last; c++) meta.columnWidths[c] = u16(d, 4) / 256;
           break;
+        }
         case 0x023e: // WINDOW2
           frozen = (u16(d, 0) & 0x08) !== 0;
           break;

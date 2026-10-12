@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `getMetadata()` returns `columnWidths`, in characters and indexed from column A like the writer's `columnWidths`, for `.xlsx`, `.xls` and `.ods`. Columns at the default width are left out.
+
+### Fixed
+
+- The writer skips a `null` in `columnWidths` (what a gap becomes after JSON) instead of writing `width="null"`.
+
 ## 1.1.9
 
 ### Changed

@@ -69,7 +69,7 @@ for await (const row of rows) {
   console.log(row.rowNumber, row.cells); // 1 ['ID', 'Name', 'Amount']
 }
 
-const meta = await rows.getMetadata(); // merged cells, hidden rows/cols, freeze panes
+const meta = await rows.getMetadata(); // merged cells, hidden rows/cols, column widths, freeze panes
 ```
 
 Dates come back as ISO-8601 strings. Opt in to more detail, each indexed like `row.cells`:
@@ -82,7 +82,7 @@ Dates come back as ISO-8601 strings. Opt in to more detail, each indexed like `r
 
 `await reader.readWorkbook(createBlobReader(blob))` lists the sheets with their visibility, the defined names and the document properties, without reading any sheet.
 
-Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format. `await rows.getImages()` returns the sheet's pictures in the writer's `images` format too (bytes included, read on that call), so they can be written back unchanged. Charts and shapes are skipped. `await rows.getComments()` returns the sheet's notes as `{ ref, text, author? }`.
+Hyperlinks are in `(await rows.getMetadata()).hyperlinks`, as `{ ref, hyperlink, tooltip? }` in the writer's format, and `columnWidths` holds the widths in characters, indexed from column A like the writer's `columnWidths`. Columns at the default width are left out. `await rows.getImages()` returns the sheet's pictures in the writer's `images` format too (bytes included, read on that call), so they can be written back unchanged. Charts and shapes are skipped. `await rows.getComments()` returns the sheet's notes as `{ ref, text, author? }`.
 
 Parts held in memory (workbook, shared strings, styles) are capped at 1 GiB uncompressed each, to stop zip bombs. The streamed worksheet is uncapped. Change both with `maxUncompressedBytes` (`Infinity` disables); `SheetEditor.edit(reader, { maxUncompressedBytes })` takes the same limit.
 

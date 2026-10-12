@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { SheetReader } from '../src/core/index';
 import { createBlobReader, type RandomAccessReader } from '../src/core/random-access';
 import { ZipRandomAccessParser } from '../src/core/zip-random-access';
+import type { SheetMetadata } from '../src/core/worksheet-parser';
 
 // One workbook saved by desktop Excel as .xlsx, .xls and .ods, and one saved by LibreOffice as .ods
 // with frozen panes. Regenerate with scripts/fixtures/make-excel-formats.ps1 and make-libreoffice-*.
@@ -41,12 +42,22 @@ describe('files saved by Excel and LibreOffice', () => {
     }
     // Excel keeps frozen panes in .xls but drops them from .ods
     expect((await load('excel-made.xls')).sheets.Data.meta).toMatchObject({ freezePanes: { row: 2, col: 1, topLeftCell: 'B3' } });
+
+    // Columns D, M and P, and the hidden S; Excel's .ods export rounds the widths a little differently
+    const widths = async (name: string) => [...((await load(name)).sheets.Data.meta as SheetMetadata).columnWidths.entries()].filter(([, w]) => w !== undefined);
+    const excel = [[3, 10.33203125], [12, 18.109375], [15, 9.44140625], [18, 0]];
+    expect(await widths('excel-made.xlsx')).toEqual(excel);
+    expect(await widths('excel-made.xls')).toEqual(excel);
+    const ods = await widths('excel-made.ods');
+    expect(ods.map(([c]) => c)).toEqual(excel.map(([c]) => c));
+    ods.forEach(([, w], i) => expect(Math.abs(w - excel[i][1])).toBeLessThan(0.5));
   });
 
   it('reads LibreOffice\'s .ods, frozen panes included', async () => {
     const { info, sheets } = await load('libreoffice-made.ods');
     expect(info.sheets.map(s => s.state)).toEqual(['visible', 'visible', 'hidden']);
     expect(info.properties).toMatchObject({ title: 'Fixture title', creator: 'Fixture author' });
+    expect(sheets.Data.meta).toMatchObject({ columnWidths: Object.assign([], { 16: 11.48 }) });
     expect(info.definedNames).toEqual([{ name: 'Answer', ref: 'Data!$B$1' }, { name: 'Numbers', ref: 'Data!$C$10:$C$3009' }]);
     expect(sheets.Data.cells.length).toBe(3004);
     expect(sheets.Data.meta).toMatchObject({ freezePanes: { row: 2, col: 0 } });
