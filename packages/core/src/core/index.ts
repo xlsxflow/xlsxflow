@@ -34,6 +34,36 @@ const DEFAULT_MAX_PART_BYTES = 1 << 30;
 const isOds = async (zip: ZipRandomAccessParser, readText: (name: string) => Promise<string>) =>
   zip.has('mimetype') && zip.has('content.xml') && (await readText('mimetype')).trim() === ODS_MIMETYPE;
 
+// Flat OpenDocument (.fods): one XML file holding what .ods keeps in separate zip parts
+async function openFlatOds(reader: RandomAccessReader) {
+  const head = await reader.read(0, Math.min(reader.size, 16384));
+  if (head[0] === 0x50 && head[1] === 0x4b) return undefined; // a zip
+  if (!/<(?:\w+:)?document\b[^>]*mimetype=["']application\/vnd\.oasis\.opendocument\.spreadsheet["']/.test(new TextDecoder().decode(head))) return undefined;
+  let prologue: Promise<string> | undefined;
+  return {
+    content: async () => reader.stream(0, reader.size),
+    // meta and settings, the parts the .ods reader reads as text, come before the body
+    readText: () => prologue ??= readUntilBody(reader),
+  };
+}
+
+async function readUntilBody(reader: RandomAccessReader): Promise<string> {
+  const text = reader.stream(0, reader.size).pipeThrough(new TextDecoderStream() as any).getReader();
+  let result = '';
+  try {
+    while (true) {
+      const { done, value } = await text.read();
+      if (done) return result;
+      const from = Math.max(0, result.length - 16);
+      result += value;
+      const end = result.slice(from).search(/<(?:\w+:)?body[\s>]/);
+      if (end >= 0) return result.slice(0, from + end);
+    }
+  } finally {
+    await text.cancel();
+  }
+}
+
 // Compound files (.xls, and .xlsx saved with a password) are read whole, so their size is capped
 async function openCompound(reader: RandomAccessReader, maxBytes = DEFAULT_MAX_PART_BYTES): Promise<XlsWorkbook | undefined> {
   if (reader.size < 8 || !isCfb(await reader.read(0, 8))) return undefined;
@@ -83,6 +113,8 @@ export class SheetReader {
   async readWorkbook(reader: RandomAccessReader, options?: Pick<ParseOptions, 'maxUncompressedBytes'>): Promise<WorkbookInfo> {
     const xls = await openCompound(reader, options?.maxUncompressedBytes);
     if (xls) return { sheets: xls.sheets.map(({ name, state }) => ({ name, state })), definedNames: xls.definedNames, properties: xls.properties };
+    const flat = await openFlatOds(reader);
+    if (flat) return readOdsWorkbook(flat.content, flat.readText);
     const zip = new ZipRandomAccessParser(reader);
     await zip.parseCentralDirectory();
     const max = options?.maxUncompressedBytes ?? DEFAULT_MAX_PART_BYTES;
@@ -134,6 +166,8 @@ export class SheetReader {
   async parse(reader: RandomAccessReader, options?: ParseOptions): Promise<ParseResult> {
     const xls = await openCompound(reader, options?.maxUncompressedBytes);
     if (xls) return xls.parseSheet(options?.sheetName, !!options?.formatted);
+    const flat = await openFlatOds(reader);
+    if (flat) return parseOds(flat.content, flat.readText, { sheetName: options?.sheetName, formulas: options?.formulas, formatted: options?.formatted, maxPaddingCells: options?.maxUncompressedBytes });
     const zip = new ZipRandomAccessParser(reader);
     await zip.parseCentralDirectory();
 

@@ -199,5 +199,5 @@ Simple formulas also get a cached result, so other programs that read the file w
 
 ## Not supported
 
-- **Other formats.** XlsxFlow reads `.xlsx`, `.xls` and `.ods`, and writes `.xlsx` and `.ods`. It doesn't read `.xlsb`, `.numbers` or HTML tables, and doesn't write `.xls`.
+- **Other formats.** XlsxFlow reads `.xlsx`, `.xls`, `.ods` and flat `.fods`, and writes `.xlsx` and `.ods`. It doesn't read `.xlsb`, `.numbers` or HTML tables, and doesn't write `.xls`.
 - **Random access to any cell.** There is no in-memory workbook. Collect the rows you need into an array or a `Map`; to change cells in a file, use `SheetEditor`.

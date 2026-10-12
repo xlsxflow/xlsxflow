@@ -142,6 +142,7 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
       let cell: Record<string, string> | undefined;
       let cellRepeat = 1;
       let text: string[] = [], para = -1, link: string | undefined;
+      let inPara = false; // text outside paragraphs is indentation (flat .fods files are pretty-printed)
       let note: { text: string[]; author?: string; inAuthor: boolean } | undefined;
       let padding = 0, rowPadding = 0;
       const checkPadding = (total: number) => {
@@ -164,7 +165,7 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
           if (depth > 0) continue;
           if (note) {
             if (t.name === 'creator') note.inAuthor = true;
-            else if (t.name === 'p') note.text.push('');
+            else if (t.name === 'p') { note.text.push(''); inPara = true; }
             continue;
           }
           switch (t.name) {
@@ -191,7 +192,7 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
               note = { text: [], inAuthor: false };
               break;
             case 'p':
-              if (cell) { text.push(''); para++; }
+              if (cell) { text.push(''); para++; inPara = true; }
               break;
             case 's':
               if (cell && para >= 0) text[para] += ' '.repeat(repeat(a['c'], 1000));
@@ -210,14 +211,15 @@ export function parseOds(content: TokenSource, readText: (name: string) => Promi
           if (depth > 0) continue;
           if (note) {
             if (note.inAuthor) note.author = (note.author ?? '') + t.value;
-            else if (note.text.length) note.text[note.text.length - 1] += t.value;
-          } else if (cell && para >= 0) text[para] += t.value;
+            else if (inPara) note.text[note.text.length - 1] += t.value;
+          } else if (cell && inPara) text[para] += t.value;
         } else {
           if (t.name === 'table') {
             if (depth-- > 0) continue;
             break; // end of the sheet
           }
           if (depth > 0) continue;
+          if (t.name === 'p') inPara = false;
           if (note) {
             if (t.name === 'creator') note.inAuthor = false;
             else if (t.name === 'annotation') {

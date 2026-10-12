@@ -1,14 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { SheetReader } from '../src/core/index';
-import { createBlobReader } from '../src/core/random-access';
+import { createBlobReader, type RandomAccessReader } from '../src/core/random-access';
+import { ZipRandomAccessParser } from '../src/core/zip-random-access';
 
 // One workbook saved by desktop Excel as .xlsx, .xls and .ods, and one saved by LibreOffice as .ods
 // with frozen panes. Regenerate with scripts/fixtures/make-excel-formats.ps1 and make-libreoffice-*.
 const open = (name: string) => createBlobReader(new Blob([readFileSync(new URL(`./fixtures/${name}`, import.meta.url))]));
 
-async function load(name: string) {
-  const reader = open(name);
+async function load(name: string | RandomAccessReader) {
+  const reader = typeof name === 'string' ? open(name) : name;
   const info = await new SheetReader().readWorkbook(reader);
   const sheets: Record<string, { cells: unknown[][]; meta: object }> = {};
   for (const { name: sheetName } of info.sheets) {
@@ -50,5 +51,24 @@ describe('files saved by Excel and LibreOffice', () => {
     expect(sheets.Data.cells.length).toBe(3004);
     expect(sheets.Data.meta).toMatchObject({ freezePanes: { row: 2, col: 0 } });
     expect(Object.values(sheets).find(s => 'freezePanes' in s.meta && s !== sheets.Data)?.meta).toMatchObject({ freezePanes: { row: 1, col: 0 } });
+  });
+
+  it('reads a flat .fods the same as the .ods it was made from', async () => {
+    // Flat ODF is the zip's XML parts inside one office:document, indented between elements as LibreOffice saves it
+    const zip = new ZipRandomAccessParser(open('libreoffice-made.ods'));
+    await zip.parseCentralDirectory();
+    const part = async (name: string) => {
+      const xml = await new Response(await zip.extractStream(name)).text();
+      return xml.slice(xml.indexOf('>', xml.indexOf('<office:document-')) + 1, xml.lastIndexOf('</office:document-'));
+    };
+    const parts = await Promise.all(['meta.xml', 'settings.xml', 'styles.xml', 'content.xml'].map(part));
+    const fods = '<?xml version="1.0" encoding="UTF-8"?>\n<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"'
+      + ' office:version="1.3" office:mimetype="application/vnd.oasis.opendocument.spreadsheet">\n'
+      + parts.join('\n').replace(/<\/text:p>/g, '</text:p>\n     ').replace(/<table:table-(row|cell)\b/g, '\n    $&')
+      + '\n</office:document>\n';
+    expect(fods).toContain('</text:p>\n     </table:table-cell>');
+
+    const ods = await load('libreoffice-made.ods');
+    expect(await load(createBlobReader(new Blob([fods])))).toEqual(ods);
   });
 });

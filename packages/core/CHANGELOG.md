@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `SheetReader` reads flat OpenDocument spreadsheets (`.fods`), the single uncompressed XML file LibreOffice can save, with the same results as `.ods`.
+
+### Fixed
+
+- `.ods` cells and notes no longer pick up whitespace that sits between elements outside a paragraph.
+
 ## 1.1.7
 
 ### Added

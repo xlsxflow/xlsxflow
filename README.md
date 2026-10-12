@@ -168,6 +168,8 @@ and document properties. `formatted: true` works on both; `formulas: true` works
   not supported.
 - `.ods` files stream like `.xlsx`. Hyperlinks and notes are read too; `formatted` returns the text the file
   stores for each cell.
+- Flat OpenDocument `.fods` files, the single XML file LibreOffice can save instead of a zip, read the same as
+  `.ods`.
 - A file saved with a password is rejected with an error that points to `decryptWorkbook` in
   [`@xlsxflow/pro`](#free-and-pro).
 
