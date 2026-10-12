@@ -67,6 +67,12 @@ const SAMPLES = [
   ["xlsxflow-password-xlsxflow.xlsx", "Saved with a password (it's xlsxflow)"],
 ];
 
+const TOOLS: [string, string, string][] = [
+  ["/compare", "Compare on your own file", "Read one of your spreadsheets with XlsxFlow, ExcelJS and SheetJS and see the time, memory and what each found."],
+  ["/csv-to-xlsx", "CSV to Excel", "Turn a .csv file into an .xlsx workbook, with numbers as numbers and leading zeros kept."],
+  ["/xlsx-to-csv", "Excel to CSV", "Save a sheet from an .xlsx, .xls or .ods file as CSV, with each cell as Excel shows it."],
+];
+
 const link = "underline decoration-grid underline-offset-4 hover:decoration-accent";
 
 // Read once at build time, so visitors' browsers never call GitHub. Hidden when unknown or zero.
@@ -97,7 +103,8 @@ export default async function Home() {
           </Link>
           <nav className="flex items-center gap-4 sm:gap-6 text-sm text-muted">
             <a href={`${REPO}#readme`} className="hover:text-ink">Docs</a>
-            <a href="#compare" className="hidden sm:inline hover:text-ink">Compare</a>
+            <a href="#tools" className="hover:text-ink">Tools</a>
+            <Link href="/compare" className="hover:text-ink">Compare</Link>
             <a href="#pro" className="hover:text-ink">Pro</a>
             <a href="#licence" className="hidden sm:inline hover:text-ink">Licence key</a>
             <a href={REPO} className="flex items-center gap-1.5 hover:text-ink" aria-label={stars ? `GitHub, ${stars} stars` : "GitHub"}>
@@ -145,6 +152,27 @@ export default async function Home() {
             ))}
             <p className="lg:col-span-2 text-muted">
               Styles, formulas, merges, frozen panes, images and more are covered in the <a href={`${REPO}#readme`} className={`${link} text-ink`}>documentation</a>.
+            </p>
+          </div>
+        </section>
+
+        <section id="tools" className="border-t border-grid scroll-mt-4">
+          <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 flex flex-col gap-6">
+            <div className="flex flex-col gap-2">
+              <h2 className="text-2xl font-semibold">Free tools</h2>
+              <p className="text-muted max-w-[68ch]">Built on XlsxFlow and running in your browser. Your files are never uploaded.</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-3">
+              {TOOLS.map(([href, title, what]) => (
+                <Link key={href} href={href} className="group border border-grid p-5 flex flex-col gap-2 hover:border-accent">
+                  <span className="font-semibold group-hover:text-accent">{title} →</span>
+                  <span className="text-sm text-muted">{what}</span>
+                </Link>
+              ))}
+            </div>
+            <p className="text-muted">
+              Node running out of memory on big spreadsheets? Read{" "}
+              <Link href="/guides/javascript-heap-out-of-memory-excel" className={`${link} text-ink`}>fixing &ldquo;JavaScript heap out of memory&rdquo; with Excel files</Link>.
             </p>
           </div>
         </section>
