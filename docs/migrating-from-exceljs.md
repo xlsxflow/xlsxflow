@@ -114,6 +114,8 @@ for await (const row of rows) {
 const { mergedCells, hyperlinks, freezePanes } = await rows.getMetadata();
 ```
 
+A cell in the workbook's default font has no `font` in `styles`, where ExcelJS reports the default's size and name (`size: 11`, say). The font appears only when the cell uses a different one.
+
 ## Writing
 
 ### Columns with headers and keys
