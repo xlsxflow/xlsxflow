@@ -33,13 +33,13 @@ async function zipOf(files: Record<string, string | Uint8Array>): Promise<Uint8A
   await zip.close();
   return done;
 }
-// A one-sheet workbook around the given <sheetData> content
-const crafted = (sheetData: string, sheet = 'S') => zipOf({
+// A one-sheet workbook around the given <sheetData> content, and what follows it in the sheet
+const crafted = (sheetData: string, sheet = 'S', after = '') => zipOf({
   '[Content_Types].xml': '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
   '_rels/.rels': '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
   'xl/workbook.xml': `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheet}" sheetId="1" r:id="rId1"/></sheets></workbook>`,
   'xl/_rels/workbook.xml.rels': '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
-  'xl/worksheets/sheet1.xml': `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`,
+  'xl/worksheets/sheet1.xml': `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData>${after}</worksheet>`,
 });
 async function rows(bytes: Uint8Array, options = {}) {
   const out = [];
@@ -157,6 +157,30 @@ describe('writer', () => {
 });
 
 describe('reader', () => {
+  it('reads data validations back in the writer\'s format, the x14 form included', async () => {
+    const dataValidations = [
+      { sqref: 'A2:A10', type: 'list' as const, formula1: '"Apple,Banana,Orange"', allowBlank: true, showErrorMessage: true, errorStyle: 'warning' as const, errorTitle: 'Pick one', error: 'From the list & only' },
+      { sqref: 'B2:B10 D2:D10', type: 'date' as const, operator: 'between' as const, formula1: new Date(Date.UTC(2026, 0, 1)), formula2: 46387, showInputMessage: true, prompt: 'A 2026 date' },
+      { sqref: 'C2', type: 'custom' as const, formula1: '=AND(C2>0,C2<B2)' },
+    ];
+    const meta = async (bytes: Uint8Array) => {
+      const result = await new SheetReader().parse(blob(bytes));
+      for await (const _ of result);
+      return (await result.getMetadata()).dataValidations;
+    };
+    expect(await meta(await write([['x']], { dataValidations }))).toEqual([
+      { ...dataValidations[0] },
+      { ...dataValidations[1], formula1: '46023', formula2: '46387' },
+      { sqref: 'C2', type: 'custom', formula1: 'AND(C2>0,C2<B2)' },
+    ]);
+    // Excel 2010+ keeps a list from another sheet in an extension, with sqref and the formula as elements
+    const x14 = '<extLst><ext uri="{CCE6A557-97BC-4b89-ADB6-D9C93CAAB3DF}"><x14:dataValidations count="1"><x14:dataValidation type="list" allowBlank="1">'
+      + '<x14:formula1><xm:f>Lists!$A$1:$A$5</xm:f></x14:formula1><xm:sqref>E2:E50</xm:sqref></x14:dataValidation></x14:dataValidations></ext></extLst>';
+    expect(await meta(await crafted('<row r="1"><c r="A1"><v>1</v></c></row>', 'S', x14))).toEqual([
+      { sqref: 'E2:E50', type: 'list', allowBlank: true, formula1: 'Lists!$A$1:$A$5' },
+    ]);
+  });
+
   it('reads .ods files, comments and images through XlsxFlow.readFile', async () => {
     const ods = await XlsxFlow.readFile(path.join(__dirname, 'fixtures', 'excel-made.ods'));
     let n = 0;

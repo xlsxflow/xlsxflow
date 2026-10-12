@@ -5,6 +5,7 @@
 ### Added
 
 - `getMetadata()` returns `columnWidths`, in characters and indexed from column A like the writer's `columnWidths`, for `.xlsx`, `.xls` and `.ods`. Columns at the default width are left out.
+- `getMetadata()` returns `dataValidations` for `.xlsx` files, in the writer's format with formulas as stored, including the form Excel uses for lists drawn from another sheet.
 
 ### Fixed
 

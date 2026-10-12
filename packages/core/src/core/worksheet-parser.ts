@@ -2,7 +2,7 @@ import { XmlToken } from './xml-stream';
 import { decodeXString, colIndex, shiftFormula, dateToSerial, MAX_COLUMNS, unescapeXml, xmlElements } from './utils';
 import { applyFontElement, ColorResolver } from './style-reader';
 import { formatValue } from './number-format';
-import type { CellStyle, RichTextRun, SheetImage } from './types';
+import type { CellStyle, DataValidation, RichTextRun, SheetImage } from './types';
 
 export type CellValue = string | number | boolean | null;
 
@@ -50,12 +50,26 @@ export function parseComments(xml: string): SheetComment[] {
 }
 
 
+// The attributes of a <dataValidation>; its formulas (and, in the x14 form, its sqref) are child elements
+function readValidation(a: Record<string, string>): DataValidation {
+  const dv: DataValidation = { sqref: a['sqref'] ?? '' };
+  if (a['type'] && a['type'] !== 'none') dv.type = a['type'] as DataValidation['type'];
+  for (const k of ['allowBlank', 'showInputMessage', 'showErrorMessage'] as const) {
+    if (a[k] !== undefined) dv[k] = a[k] === '1' || a[k] === 'true';
+  }
+  if (a['operator']) dv.operator = a['operator'] as DataValidation['operator'];
+  if (a['errorStyle']) dv.errorStyle = a['errorStyle'] as DataValidation['errorStyle'];
+  for (const k of ['errorTitle', 'error', 'promptTitle', 'prompt'] as const) if (a[k]) dv[k] = a[k];
+  return dv;
+}
+
 export interface SheetMetadata {
   mergedCells: string[];
   hiddenRows: number[];
   hiddenCols: number[];
   // In characters, by column index from 0 (the writer's columnWidths); columns at the default width are left out
   columnWidths: number[];
+  dataValidations?: DataValidation[]; // in the writer's format, formulas as stored; .xlsx only
   freezePanes?: { row: number; col: number; topLeftCell: string; activePane: string };
   // hyperlink is a URL, or "#Sheet!A1" for a place in the workbook (the writer's format)
   hyperlinks: { ref: string; hyperlink: string; tooltip?: string }[];
@@ -184,6 +198,9 @@ export function parseWorksheet(
   const hiddenRows: number[] = [];
   const hiddenColMarks = new Uint8Array(MAX_COLUMNS + 1); // by column; repeated <col> ranges cost nothing extra
   const columnWidths: number[] = [];
+  const dataValidations: DataValidation[] = [];
+  let validation: DataValidation | undefined;
+  let validationPart: 'formula1' | 'formula2' | 'sqref' | undefined;
   let padding = 0;
   const hyperlinks: SheetMetadata['hyperlinks'] = [];
   let freezePanes: SheetMetadata['freezePanes'] = undefined;
@@ -299,6 +316,11 @@ export function parseWorksheet(
               const target = id ? options.hyperlinkTargets?.get(id) : undefined;
               const hyperlink = target ? (location ? `${target}#${location}` : target) : location ? `#${location}` : '';
               if (ref && hyperlink) hyperlinks.push(tooltip ? { ref, hyperlink, tooltip } : { ref, hyperlink });
+            } else if (token.name === 'dataValidation') {
+              dataValidations.push(validation = readValidation(token.attributes));
+            } else if (validation && (token.name === 'formula1' || token.name === 'formula2' || token.name === 'sqref')) {
+              validationPart = token.name;
+              validation[validationPart] = '';
             } else if (token.name === 'mergeCell') {
               if (token.attributes['ref']) mergedCells.push(token.attributes['ref']);
             } else if (token.name === 'pane') {
@@ -314,7 +336,9 @@ export function parseWorksheet(
             }
           } else if (token.type === 'text') {
             if (skipDepth > 0) continue;
-            if (inValue) {
+            if (validation && validationPart) {
+              validation[validationPart] += token.value; // the x14 form nests the text in <xm:f>
+            } else if (inValue) {
               currentCellValue = (currentCellValue || '') + token.value;
             } else if (inFormula) {
               currentFormula += token.value;
@@ -327,6 +351,8 @@ export function parseWorksheet(
             if (skipDepth > 0) continue;
 
             if (token.name === 'worksheet') closedWorksheet = true;
+            if (token.name === validationPart) validationPart = undefined;
+            else if (token.name === 'dataValidation') validation = undefined;
             if (token.name === 'row') {
               const row: RowData = { rowNumber: currentRowNumber, cells: currentRow };
               if (rowFormulas) row.formulas = rowFormulas;
@@ -428,7 +454,7 @@ export function parseWorksheet(
       if (inRow || inCell || openedWorksheet && !closedWorksheet) throw new Error('Worksheet XML is cut off: the sheet ends before its closing tags.');
       const hiddenCols: number[] = [];
       hiddenColMarks.forEach((hidden, c) => { if (hidden) hiddenCols.push(c); });
-      resolveMeta({ mergedCells, hiddenRows, hiddenCols, columnWidths, freezePanes, hyperlinks });
+      resolveMeta({ mergedCells, hiddenRows, hiddenCols, columnWidths, dataValidations, freezePanes, hyperlinks });
     } catch (e) {
       rejectMeta(e);
       throw e;
