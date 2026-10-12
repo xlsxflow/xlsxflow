@@ -7,3 +7,10 @@
 # Share image from app/opengraph-image.tsx; it has no file extension to infer the type from
 /opengraph-image
   Content-Type: image/png
+
+# The comparison page measures its workers' memory, which browsers allow only on a cross-origin isolated page
+/compare
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+/_next/static/*
+  Cross-Origin-Embedder-Policy: require-corp

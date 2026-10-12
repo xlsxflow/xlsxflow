@@ -216,6 +216,9 @@ export default async function Home() {
                 scripts</a> are in the README. Spotted something out of date? <a href={`mailto:${CONTACT}`} className={link}>Tell us</a> and
                 we&apos;ll correct it.
               </p>
+              <p>
+                Want numbers for your own data? <Link href="/compare" className={link}>Compare all three on one of your files</Link>, in your browser.
+              </p>
               <p>SheetJS and ExcelJS belong to their respective owners. XlsxFlow isn&apos;t affiliated with or endorsed by either project.</p>
             </div>
           </div>

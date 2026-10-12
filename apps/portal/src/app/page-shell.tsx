@@ -15,7 +15,8 @@ export default function PageShell({ children }: { children: React.ReactNode }) {
           </Link>
           <nav className="flex items-center gap-4 sm:gap-6 text-sm text-muted">
             <Link href="/csv-to-xlsx" className="hover:text-ink">CSV to Excel</Link>
-            <Link href="/xlsx-to-csv" className="hover:text-ink">Excel to CSV</Link>
+            <Link href="/xlsx-to-csv" className="hidden sm:inline hover:text-ink">Excel to CSV</Link>
+            <Link href="/compare" className="hover:text-ink">Compare</Link>
             <a href={REPO} className="hidden sm:inline hover:text-ink">GitHub</a>
           </nav>
         </div>

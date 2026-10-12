@@ -28,6 +28,7 @@ Use XlsxFlow when files are large, memory is limited (serverless, edge, browser)
 - [Benchmarks](https://github.com/xlsxflow/xlsxflow#benchmarks): against ExcelJS, SheetJS and others, with the scripts to reproduce them
 - [Fixing "JavaScript heap out of memory" with Excel files](https://www.xlsxflow.workers.dev/guides/javascript-heap-out-of-memory-excel): causes and fixes for ExcelJS, SheetJS and XlsxFlow
 - [CSV to Excel](https://www.xlsxflow.workers.dev/csv-to-xlsx) and [Excel to CSV](https://www.xlsxflow.workers.dev/xlsx-to-csv) converters that run in the browser, built on XlsxFlow
+- [Compare on your own file](https://www.xlsxflow.workers.dev/compare): reads a file you choose with XlsxFlow, ExcelJS and SheetJS in the browser and compares time, memory and counts
 - [@xlsxflow/core on npm](https://www.npmjs.com/package/@xlsxflow/core)
 
 ## Pro
