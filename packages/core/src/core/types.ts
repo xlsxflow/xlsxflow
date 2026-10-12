@@ -155,8 +155,8 @@ export interface DataValidation {
   showInputMessage?: boolean;
   showErrorMessage?: boolean;
   operator?: ComparisonOperator; // for whole, decimal, date, time and textLength
-  formula1?: string;
-  formula2?: string;
+  formula1?: string | number | Date; // a Date is stored as its serial, like a date cell
+  formula2?: string | number | Date;
   promptTitle?: string;
   prompt?: string;
   errorTitle?: string;

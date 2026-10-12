@@ -118,6 +118,16 @@ describe('sheet layout options', () => {
     expect(await read('xl/worksheets/sheet1.xml')).toContain(
       '<dataValidation sqref="A1:A9" type="whole" operator="between" showErrorMessage="1" showInputMessage="1" errorTitle="Nope" error="Whole numbers 1-10" prompt="Enter 1-10"><formula1>1</formula1><formula2>10</formula2></dataValidation>');
   });
+
+  it('takes Dates and numbers as validation bounds, and rejects an unknown errorStyle', async () => {
+    const read = await entries(new SheetWriter().addSheet('S', [[1]], {
+      dataValidations: [{ sqref: 'A1', type: 'date', operator: 'between', formula1: new Date(Date.UTC(2026, 0, 1)), formula2: 46387 }],
+    }).write());
+    expect(await read('xl/worksheets/sheet1.xml')).toContain('<formula1>46023</formula1><formula2>46387</formula2>');
+    const bad = (dv: object) => new Response(new SheetWriter().addSheet('S', [[1]], { dataValidations: [{ sqref: 'A1', ...dv }] }).write()).arrayBuffer();
+    await expect(bad({ errorStyle: 'error' })).rejects.toThrow(/errorStyle "error"; use "stop", "warning" or "information"/);
+    await expect(bad({ type: 'date', formula1: new Date('nope') })).rejects.toThrow(/invalid Date/);
+  });
 });
 
 describe('tables', () => {

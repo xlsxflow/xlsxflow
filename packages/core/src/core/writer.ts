@@ -503,6 +503,9 @@ export class SheetWriter {
         if (dv.type) attr += ` type="${escapeXml(dv.type)}"`;
         if (dv.allowBlank !== undefined) attr += ` allowBlank="${dv.allowBlank ? 1 : 0}"`;
         if (dv.showInputMessage !== undefined) attr += ` showInputMessage="${dv.showInputMessage ? 1 : 0}"`;
+        if (dv.errorStyle && !['stop', 'warning', 'information'].includes(dv.errorStyle)) {
+          throw new Error(`Data validation for ${dv.sqref} has errorStyle "${dv.errorStyle}"; use "stop", "warning" or "information".`);
+        }
         if (dv.errorStyle) attr += ` errorStyle="${escapeXml(dv.errorStyle)}"`;
         if (dv.operator) attr += ` operator="${escapeXml(dv.operator)}"`;
         if (dv.showErrorMessage !== undefined || dv.error) attr += ` showErrorMessage="${dv.showErrorMessage ?? true ? 1 : 0}"`;
@@ -511,7 +514,12 @@ export class SheetWriter {
           if (dv[k]) attr += ` ${k}="${escapeXml(dv[k]!)}"`;
         }
         // The file stores formulas without "="; a typed list ("a,b,c") holds at most 255 characters
-        const f1 = dv.formula1?.replace(/^=/, ''), f2 = dv.formula2?.replace(/^=/, '');
+        const formula = (f: string | number | Date | undefined) => {
+          if (!(f instanceof Date)) return f?.toString().replace(/^=/, '');
+          if (isNaN(f.getTime())) throw new Error(`Data validation for ${dv.sqref} has an invalid Date.`);
+          return String(dateToSerial(f));
+        };
+        const f1 = formula(dv.formula1), f2 = formula(dv.formula2);
         if (dv.type === 'list' && f1?.startsWith('"') && f1.length - 2 > 255) {
           throw new Error(`List validation for ${dv.sqref} has ${f1.length - 2} characters; Excel allows 255. Put the items in cells and refer to the range.`);
         }

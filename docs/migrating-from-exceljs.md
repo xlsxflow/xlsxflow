@@ -274,6 +274,10 @@ const writer = new SheetWriter().addSheet('Data', [['Region', 'Approved', 'Total
 });
 ```
 
+A validation covers a range, so the per-cell `dataValidations.add()` loop ExcelJS needs becomes one entry. ExcelJS's `formulae: [a, b]` becomes `formula1` and `formula2`, which take a string, a number or a `Date`. `errorStyle` is `'stop'`, `'warning'` or `'information'`; anything else is rejected.
+
+Dates written without a number format show as `yyyy-mm-dd` (`yyyy-mm-dd hh:mm:ss` with a time); ExcelJS shows `mm-dd-yy`. Set `numFmt` on the cell when the display matters.
+
 Tables, outline levels, row heights, protection, page setup and tab colours are sheet options as well; see the [README](../README.md#styles-formulas--conditional-formats).
 
 ## Editing an existing file

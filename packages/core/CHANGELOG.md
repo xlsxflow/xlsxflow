@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Data validation `formula1` and `formula2` take a number or a `Date` as well as a string; a `Date` is stored as its serial, like a date cell. Passing a `Date` used to fail with an internal `replace is not a function` error.
+- An `errorStyle` other than `stop`, `warning` or `information` throws instead of being written into a file Excel then reads as `stop`.
+
 ## 1.1.8
 
 ### Added
