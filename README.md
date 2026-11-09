@@ -170,8 +170,8 @@ and document properties. `formatted: true` works on both; `formulas: true` works
   stores for each cell.
 - Flat OpenDocument `.fods` files, the single XML file LibreOffice can save instead of a zip, read the same as
   `.ods`.
-- A file saved with a password is rejected with an error that points to `decryptWorkbook` in
-  [`@xlsxflow/pro`](#free-and-pro).
+- A file saved with a password is rejected with an error that says so. `decryptWorkbook` in
+  [`@xlsxflow/pro`](#free-and-pro) decrypts it first.
 
 `OdsWriter` writes `.ods` with the same rows as `SheetWriter`: values, dates, formulas (converted to
 OpenFormula, with their results), merged cells, column widths, frozen panes, hidden sheets and document properties. Cell styles,

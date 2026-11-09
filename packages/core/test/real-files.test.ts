@@ -83,3 +83,17 @@ describe('files saved by Excel and LibreOffice', () => {
     expect(await load(createBlobReader(new Blob([fods])))).toEqual(ods);
   });
 });
+
+describe('password-protected files', () => {
+  it('are rejected with an error that names no paid package', async () => {
+    const { CfbReader } = await import('../src/core/cfb');
+    expect(new CfbReader(new Uint8Array(readFileSync(new URL('./fixtures/encrypted.xlsx', import.meta.url)))).has('EncryptionInfo')).toBe(true);
+    const error = await new SheetReader().readWorkbook(open('encrypted.xlsx')).catch((e: Error) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/password-protected/);
+    expect((error as Error).message).not.toMatch(/xlsxflow\/pro/);
+    const zip = await new ZipRandomAccessParser(open('encrypted.xlsx')).parseCentralDirectory().catch((e: Error) => e);
+    expect((zip as Error).message).toMatch(/compound file/);
+    expect((zip as Error).message).not.toMatch(/xlsxflow\/pro/);
+  });
+});

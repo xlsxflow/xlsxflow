@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The errors for password-protected workbooks no longer name `@xlsxflow/pro`, so an app can show them to its own users. The README covers decrypting.
+
 ## 1.2.0
 
 ### Added

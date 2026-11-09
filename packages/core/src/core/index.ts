@@ -70,7 +70,7 @@ async function openCompound(reader: RandomAccessReader, maxBytes = DEFAULT_MAX_P
   if (reader.size > maxBytes) throw new Error(`Security Error: the ${reader.size}-byte file is larger than maxUncompressedBytes (${maxBytes}).`);
   const cfb = new CfbReader(await reader.read(0, reader.size));
   if (cfb.has('EncryptionInfo')) {
-    throw new Error('This workbook is password-protected. Decrypt it first with decryptWorkbook from @xlsxflow/pro, or save it without a password in Excel.');
+    throw new Error('This workbook is password-protected. Decrypt it first, or save it without a password in Excel.');
   }
   return new XlsWorkbook(cfb);
 }

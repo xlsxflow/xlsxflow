@@ -44,7 +44,7 @@ export class ZipRandomAccessParser {
 
     if (eocdOffset === -1) {
       if (isCfb(buffer.subarray(0, 8)) || searchStart > 0 && isCfb(await this.reader.read(0, 8))) {
-        throw new Error('This file is a compound file, not a ZIP: an .xls, or a workbook saved with a password. Decrypt it first with decryptWorkbook from @xlsxflow/pro.');
+        throw new Error('This file is a compound file, not a ZIP: an .xls, or a workbook saved with a password. Open it with SheetReader, and decrypt it first if it has a password.');
       }
       throw new Error("End of Central Directory (EOCD) not found. This may not be a valid ZIP file.");
     }
